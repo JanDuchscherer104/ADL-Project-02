@@ -1,0 +1,25 @@
+# Team Work 
+
+
+
+## Work Packages 
+
+[Describe all work packages]
+
+Tahble @tbl-wps contains all work packages defined for this project.
+
++-------------+--------------------------------+
+| Package No. | Description                    |
++=============+================================+
+|             |                                |
+|             |                                |
++-------------+--------------------------------+
+|             |                                |
+|             |                                |
++-------------+--------------------------------+
+
+: Work packages. {#tbl-wps}
+
+## Timeline 
+
+[Describe who worked on which work package and when]

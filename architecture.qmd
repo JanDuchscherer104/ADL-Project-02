@@ -1,0 +1,50 @@
+# Architecture
+
+This chapter describes the architecture of the system.
+
+## Overview
+
+[Give an overview of the architecture]
+
+## Modules 
+
+[Describe the modules of your system. If you added/removed/changed modules, explain why and change the chapter structure accordingly. A module description contains: Role in the overall system, input/output data, data flow, used packages, specific design decisions, ...]
+
+### Webcam 
+
+### Object Detector 
+
+[Also describe the used architectures (see team-project presentation) in short (most important advances)]
+
+
+::: {.callout-tip}
+You can reference literature from bibtex files (references.bib). Example: Use @knuth84 for additional discussion of literate programming.
+:::
+
+### Article Agent 
+
+[Also describe the used tools (e.g. wikipedia) and the reason for that choice]
+
+### Article Assembler 
+
+[Also describe potential article templates/structures you designed]
+
+### Diffusion Model 
+
+[Also describe the used diffusion model]
+
+
+
+
+::: {.callout-tip}
+You can also work with equations. Example:
+ (@eq-black-scholes) is a mathematical model that seeks to explain the behavior of financial derivatives, most commonly options:
+
+$$
+\frac{\partial \mathrm C}{ \partial \mathrm t } + \frac{1}{2}\sigma^{2} \mathrm S^{2}
+\frac{\partial^{2} \mathrm C}{\partial \mathrm C^2}
+  + \mathrm r \mathrm S \frac{\partial \mathrm C}{\partial \mathrm S}\ =
+  \mathrm r \mathrm C 
+$$ {#eq-black-scholes}
+
+:::

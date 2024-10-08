@@ -1,0 +1,15 @@
+# Domain
+[describe the chosen article domain, e.g. ikea-like user manuals or cook books, ...]
+
+## Article Structure  
+[How is the generated article structured?]
+
+## Data Set 
+[Describe the data set (source, size, examples, ...)]
+
+::: {.callout-tip}
+You can use figures and reference them in the text (but only outside of tip-sections :D): 
+:::
+![Elephants.](images/elephants.png){#fig-elephants}
+
+This is how references are used: @fig-elephants

@@ -1,0 +1,27 @@
+project:
+  type: book
+
+book:
+  title: "Team Project (ADL)"
+  author: "[first and last name of all authors]"
+  date: "9/24/2024"
+  chapters:
+    - index.qmd
+    - summary.qmd
+    - domain.qmd
+    - architecture.qmd
+    - evaluation.qmd
+    - manual.qmd
+    - team.qmd
+    - references.qmd
+
+bibliography: references.bib
+
+format:
+  html:
+    theme: cosmo
+  pdf:
+    documentclass: scrreprt
+
+
+

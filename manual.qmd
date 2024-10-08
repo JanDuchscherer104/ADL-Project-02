@@ -1,0 +1,11 @@
+# Manual
+
+This chapter contains a description of the steps necessary to install and use the system. 
+
+## Installation 
+
+[Describe the steps necessary to install the system, starting with cloning the git repository.]
+
+## Usage 
+
+[Describe in detail the steps required to create an article].

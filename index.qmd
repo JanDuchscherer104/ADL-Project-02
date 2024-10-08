@@ -1,0 +1,8 @@
+# Preface {.unnumbered}
+
+This is the project documentation for the team project at the Advanced Deep Learning course (winter term 24/25, Munich University of Applied Sciences).
+
+::: {.callout-tip}
+Text blocks in square brackets [] describe what you should add to the manuscript. 
+When you are done, you can remote them. You can remove all tip-boxes as well.
+::: 

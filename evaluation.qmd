@@ -1,0 +1,21 @@
+# Evaluation
+
+This chapter contains important evaluation results for the modules of the system.
+
+## Image Classifier
+
+[Show evaluation results as described in the team-project slides]
+
+[Describe how you get to ds2 based on the results on ds1]
+
+## Article Agent 
+
+[Show some best- and worst-case examples and their timings]
+
+## Diffusion Model 
+
+[Show some generation results and timings]
+
+## Article Assembler 
+
+[Show some generation examples and timings that show how long the entire generation process takes]
