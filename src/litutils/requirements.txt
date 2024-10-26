@@ -1,0 +1,15 @@
+pydantic
+pydantic-yaml
+mlflow
+torch
+torchvision
+torchaudio
+pytorch-lightning
+torchmetrics
+tensorboard
+pandas
+pandarallel
+torchviz
+numpy
+seaborn
+rich
