@@ -1,15 +1,14 @@
 pydantic
 pydantic-yaml
-mlflow
-torch
+# torch - install it manually
 torchvision
 torchaudio
 pytorch-lightning
 torchmetrics
 tensorboard
 pandas
-pandarallel
-torchviz
+optuna
+wandb
 numpy
 seaborn
 rich

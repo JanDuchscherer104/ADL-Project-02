@@ -36,9 +36,6 @@ CONSOLE = _Console(width=120)
 TargetType = TypeVar("TargetType")
 
 
-# BaseConfig without generics
-
-
 class NoTarget:
     @staticmethod
     def setup_target(config: "BaseConfig", **kwargs: Any) -> None:
@@ -48,13 +45,17 @@ class NoTarget:
         return None
 
 
-class BaseConfig(BaseModel):
-    target: Callable[..., Any] = Field(default_factory=lambda: NoTarget)
+class BaseConfig(BaseModel, Generic[TargetType]):
+    target: Callable[["BaseConfig[TargetType]"], TargetType] = Field(
+        default_factory=lambda: NoTarget
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_default=True)
 
     @classmethod
-    def from_yaml(cls: Type["BaseConfig"], file: Union[Path, str]) -> "BaseConfig":
+    def from_yaml(
+        cls: Type["BaseConfig[TargetType]"], file: Union[Path, str]
+    ) -> "BaseConfig[TargetType]":
         return cls.model_validate(parse_yaml_file_as(cls, file))  # type: ignore
 
     def to_yaml(self, file: Union[Path, str]) -> None:
@@ -68,7 +69,7 @@ class BaseConfig(BaseModel):
             lines.append(f"{key}: {val}")
         return "\n    ".join(lines)
 
-    def setup_target(self, **kwargs: Any) -> Any:
+    def setup_target(self, **kwargs: Any) -> TargetType:
         if not callable(factory := getattr(self.target, "setup_target", self.target)):
             CONSOLE.print(
                 f"Target '[bold yellow]{self.target}[/bold yellow]' of type [bold yellow]{factory.__class__.__name__}[/bold yellow] is not callable."
@@ -91,7 +92,7 @@ class BaseConfig(BaseModel):
 _singleton_instances = {}  # type: ignore
 
 
-class _SharedParams(BaseModel):
+class _SingletonParams(BaseModel):
     """
     _SharedParams acts as a singleton base class for any shared configuration
     parameters. Derived classes will share the same instance across the application.

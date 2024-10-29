@@ -2,7 +2,7 @@ import unittest
 
 import optuna
 
-from litutils import OptunaOptimizable
+from litutils import Optimizable
 
 
 class TestOptunaOptimizable(unittest.TestCase):
@@ -12,37 +12,37 @@ class TestOptunaOptimizable(unittest.TestCase):
         )
 
     def test_int_target(self):
-        config = OptunaOptimizable(start=1, end=10, step=1, target=int)
+        config = Optimizable(start=1, end=10, step=1, target=int)
         result = config.setup_target("int_param", self.trial)
         self.assertIsInstance(result, int)
 
     def test_float_target(self):
-        config = OptunaOptimizable(start=0.1, end=1.0, target=float)
+        config = Optimizable(start=0.1, end=1.0, target=float)
         result = config.setup_target("float_param", self.trial)
         self.assertIsInstance(result, float)
 
     def test_bool_target(self):
-        config = OptunaOptimizable(default=True, target=bool)
+        config = Optimizable(default=True, target=bool)
         result = config.setup_target("bool_param", self.trial)
         self.assertIsInstance(result, bool)
 
     def test_cat_target(self):
-        config = OptunaOptimizable(categories=["a", "b", "c"], target=str)
+        config = Optimizable(categories=["a", "b", "c"], target=str)
         result = config.setup_target("cat_param", self.trial)
         self.assertIsInstance(result, str)
 
     def test_int_target_missing_values(self):
-        config = OptunaOptimizable(target=int)
+        config = Optimizable(target=int)
         with self.assertRaises(ValueError):
             config.setup_target("int_param", self.trial)
 
     def test_float_target_missing_values(self):
-        config = OptunaOptimizable(target=float)
+        config = Optimizable(target=float)
         with self.assertRaises(ValueError):
             config.setup_target("float_param", self.trial)
 
     def test_cat_target_missing_values(self):
-        config = OptunaOptimizable(target=str)
+        config = Optimizable(target=str)
         with self.assertRaises(ValueError):
             config.setup_target("cat_param", self.trial)
 

@@ -70,7 +70,7 @@ class _GlobalExperimentConfig(BaseConfig):
     @model_validator(mode="after")
     def __setup_mlflow(self) -> Self:
         if self.is_mlflow:
-            self.mlflow_config.setup_mlflow(mlflow_uri=self.paths.mlflow_uri)
+            self.mlflow_config.setup_mlflow(mlflow_uri=self.paths.wandb)
 
         return self
 

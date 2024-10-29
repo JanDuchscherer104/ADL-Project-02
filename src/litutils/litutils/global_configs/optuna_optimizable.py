@@ -1,14 +1,12 @@
 from typing import Generic, Optional, Sequence, Type, TypeVar, Union, get_args
 
 import optuna
-from pydantic import Field
-
-from ..utils import BaseConfig
+from pydantic import BaseModel, Field
 
 T = TypeVar("T", int, float, bool, str)
 
 
-class OptunaOptimizable(BaseConfig, Generic[T]):
+class Optimizable(BaseModel, Generic[T]):
     target: Type[T]
 
     start: Optional[Union[int, float]] = Field(None)
