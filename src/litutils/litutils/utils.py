@@ -1,8 +1,19 @@
 import traceback
 from enum import Enum
+from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Generic, Optional, Type, TypeVar, Union
-from warnings import formatwarning, warn
+from threading import Lock
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    Generic,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_yaml import parse_yaml_file_as, to_yaml_file
@@ -89,45 +100,48 @@ class BaseConfig(BaseModel, Generic[TargetType]):
         return "\n    ".join(lines)
 
 
-_singleton_instances = {}  # type: ignore
+class SingletonConfig(BaseConfig):
+    """Base class for singleton configurations."""
 
+    _instances: ClassVar[Dict[Type, Any]] = {}
+    _lock: ClassVar[Lock] = Lock()
 
-class _SingletonParams(BaseModel):
-    """
-    _SharedParams acts as a singleton base class for any shared configuration
-    parameters. Derived classes will share the same instance across the application.
-    """
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True, validate_assignment=True, validate_default=True
+    )
 
     def __new__(cls, *args, **kwargs):
-        if cls in _singleton_instances:
-            instance = _singleton_instances[cls]
-            # Check for differences between existing attributes and new arguments
-            new_values = cls._get_relevant_kwargs(kwargs)
-            for key, value in new_values.items():
-                if getattr(instance, key) != value:
-                    CONSOLE.warn(
-                        f"Singleton instance of {cls.__name__} is being modified. "
-                        f"Field '{key}' changed from {getattr(instance, key)} to {value}."
-                    )
-                    setattr(instance, key, value)
-        else:
-            instance = super().__new__(cls)
-            _singleton_instances[cls] = instance
-        return instance
+        with cls._lock:
+            if cls not in cls._instances:
+                # Create new instance via Pydantic's BaseModel.__new__
+                instance = super(BaseConfig, cls).__new__(cls)
+                # Set initialization flag in dict to avoid Pydantic validation
+                instance.__dict__["_initialized"] = False
+                cls._instances[cls] = instance
+            return cls._instances[cls]
 
-    @classmethod
-    def _get_relevant_kwargs(cls, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """
-        Filter out only the keyword arguments that are relevant to the class.
-        This helps in comparing new values with the existing instance's values.
-        """
-        relevant_kwargs = {}
-        for key, value in kwargs.items():
-            if (
-                key in cls.model_fields
-            ):  # Only consider fields defined in the Pydantic model
-                relevant_kwargs[key] = value
-        return relevant_kwargs
+    def __init__(self, **kwargs):
+        if not getattr(self, "_initialized", False):
+            # Only initialize once via Pydantic
+            super().__init__(**kwargs)
+            self.__dict__["_initialized"] = True
+        else:
+            # Update existing instance if new values provided
+            for key, value in kwargs.items():
+                if hasattr(self, key):
+                    current = getattr(self, key)
+                    if current != value:
+                        CONSOLE.warn(
+                            f"Updating singleton {self.__class__.__name__} "
+                            f"field '{key}' from {current} to {value}"
+                        )
+                    setattr(self, key, value)
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
 
 
 class Stage(Enum):
