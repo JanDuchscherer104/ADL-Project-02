@@ -3,22 +3,22 @@ from typing import Annotated, Type
 
 from pydantic import Field, ValidationInfo, field_validator
 
-from ..utils import BaseConfig
+from ..utils import _SingletonParams
 
 
-class PathConfig(BaseConfig):
+class PathConfig(_SingletonParams):
     root: Path = Field(default_factory=lambda: Path(__file__).parents[4].resolve())
     target: Type["PathConfig"] = Field(default_factory=lambda: PathConfig)
 
     data: Annotated[Path, Field(default=".data")]
-    webcam_captue: Annotated[Path, Field(default=".data/webcam_captue")]
+    webcam_capture: Annotated[Path, Field(default=".data/webcam_capture")]
     checkpoints: Annotated[Path, Field(default=".logs/checkpoints")]
     tb_logs: Annotated[Path, Field(default=".logs/tb_logs")]
     configs: Annotated[Path, Field(default=".configs")]
     wandb: Annotated[str, Field(default=".logs/wandb")]
 
     @field_validator(
-        "data", "checkpoints", "tb_logs", "configs", "webcam_captue", mode="before"
+        "data", "checkpoints", "tb_logs", "configs", "webcam_capture", mode="before"
     )
     @classmethod
     def __convert_to_path(cls, v: str, info: ValidationInfo) -> Path:
