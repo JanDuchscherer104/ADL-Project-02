@@ -1,4 +1,3 @@
-import unittest
 from enum import Enum, auto
 from typing import Any, Dict, Optional, Tuple, Type, Union
 
@@ -10,7 +9,7 @@ from pydantic import Field, ValidationInfo, field_validator
 from pytorch_lightning.loggers import WandbLogger
 from torch import Tensor, nn
 from torch.optim import AdamW, Optimizer
-from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
+from torch.optim.lr_scheduler import OneCycleLR
 
 from litutils import BaseConfig
 
