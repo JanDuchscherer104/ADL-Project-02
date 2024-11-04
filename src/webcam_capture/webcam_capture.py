@@ -50,7 +50,10 @@ class Webcam:
     def _save_image(self, frame: cv2.VideoCapture) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = (
-            (self.output_dir / f"image_{timestamp}").with_suffix(".jpg").as_posix()
+            (self.output_dir / f"image_{timestamp}")
+            .absolute()
+            .with_suffix(".jpg")
+            .as_posix()
         )
         cv2.imwrite(filename, frame)
         print(f"Image saved: {filename}")

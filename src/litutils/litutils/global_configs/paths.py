@@ -17,7 +17,9 @@ class PathConfig(BaseConfig):
     configs: Annotated[Path, Field(default=".configs")]
     wandb: Annotated[str, Field(default=".logs/wandb")]
 
-    @field_validator("data", "checkpoints", "tb_logs", "configs", mode="before")
+    @field_validator(
+        "data", "checkpoints", "tb_logs", "configs", "webcam_captue", mode="before"
+    )
     @classmethod
     def __convert_to_path(cls, v: str, info: ValidationInfo) -> Path:
         root = info.data.get("root")
