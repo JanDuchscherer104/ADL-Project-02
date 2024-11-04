@@ -1,36 +1,25 @@
 # ADL-Project
 
+### Setup
+
+1. Create a conda environment
+```zsh
+conda create -n prj-adl
+conda activate prj-adl
 ```
-project-root/
-│
-├── src/
-│   ├── webcam_module/
-│   │   └── webcam_capture.py
-│   ├── img_classifier/
-│   │   ├── alexnet.py
-│   │   ├── resnet.py
-│   │   ├── vit.py
-│   │   ├── lit_data_module.py
-│   │   └── lit_trainer.py
-│   ├── llm_toolchain/
-│   │   ├── langchain_agent.py
-│   │   └── gather_information.py
-│   ├── diffusion_model/
-│   │   └── generate_images.py
-│   ├── article_assembler/
-│   │   ├── create_markdown.py
-│   │   └── convert_to_pdf.py
-│   └── utils/
-│       ├── data_module.py
-│       ├── augmentation.py
-│       └── config.py
-│
-├── docs/
-│   ├── ROADMAP.md
-│   ├── TODO.md
-│   └── DATASETS.md
-│
-├── requirements.txt
-├── setup.py
-└── README.md
+
+2. Install PyTorch follwing the [official instructions](https://pytorch.org/get-started/locally/).
+eg. for CUDA $\geq$ 12.4, using conda:
+```zsh
+conda install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
+```
+
+3. Install the requirements from the `requirements.txt` file
+```zsh
+pip install -r requirements.txt
+```
+
+4. Install the project's packages
+```zsh
+pip install -e src/litutils
 ```
