@@ -1,8 +1,7 @@
 pydantic
 pydantic-yaml
+opencv-python
 # torch - install it manually
-torchvision
-torchaudio
 pytorch-lightning
 torchmetrics
 tensorboard
