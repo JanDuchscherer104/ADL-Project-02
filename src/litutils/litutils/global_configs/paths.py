@@ -11,6 +11,7 @@ class PathConfig(BaseConfig):
     target: Type["PathConfig"] = Field(default_factory=lambda: PathConfig)
 
     data: Annotated[Path, Field(default=".data")]
+    webcam_captue: Annotated[Path, Field(default=".data/webcam_captue")]
     checkpoints: Annotated[Path, Field(default=".logs/checkpoints")]
     tb_logs: Annotated[Path, Field(default=".logs/tb_logs")]
     configs: Annotated[Path, Field(default=".configs")]
