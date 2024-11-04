@@ -1,7 +1,6 @@
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
-from typing import Callable, Type, TypeVar, Union
+from typing import Self, Type
 
 import cv2
 from pydantic import Field
@@ -9,55 +8,27 @@ from pydantic import Field
 from litutils.global_configs.paths import PathConfig
 from litutils.utils import BaseConfig
 
-T = TypeVar("T")
 
-
-class CaptureConfig(BaseConfig[Callable]):
-    output_dir: Path = Field(
-        default=None, description="Directory to save captured images"
-    )
-    target: Callable[["CaptureConfig"], Callable] = Field(
+class CaptureConfig(BaseConfig):
+    output_dir: Path
+    camera_index: int = 0
+    target: Type["Webcam"] = Field(
         default_factory=lambda: Webcam,
         description="The target callable class for capturing images",
     )
 
-    def set_paths_from_config(self, path_config: PathConfig):
-        self.output_dir = path_config.data / "captured_images"
-
-
-class Command(Enum):
-    CAPTURE = "capture"
-    QUIT = "quit"
-
-
-class WebcamCaptureContext:
-    def __init__(self, config: CaptureConfig):
-        self.config = config
-        self.webcam = self.config.setup_target()(output_dir=self.config.output_dir)
-
-    def execute(self, command: Command):
-        match command:
-            case Command.CAPTURE:
-                self.webcam.capture_image()
-            case Command.QUIT:
-                self.webcam.release()
-            case _:
-                print(f"Unknown command: {command}")
-
 
 class Webcam:
-    def __init__(self, output_dir: Path):
-        self.output_dir = output_dir
-        self.cap = cv2.VideoCapture(0)
+    def __init__(self, config: CaptureConfig) -> None:
+        self.config = config
+        self.output_dir = config.output_dir
+        self.cap = cv2.VideoCapture(self.config.camera_index)
         if not self.cap.isOpened():
-            raise RuntimeError("Error: Could not open webcam.")
-        self._ensure_output_directory_exists()
+            raise RuntimeError(
+                f"Error: Could not open webcam with index {self.config.camera_index}"
+            )
 
-    def _ensure_output_directory_exists(self):
-        if not self.output_dir.exists():
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-
-    def capture_image(self):
+    def capture_image(self) -> None:
         print("Press 'c' to capture an image or 'q' to quit.")
         while True:
             ret, frame = self.cap.read()
@@ -66,39 +37,34 @@ class Webcam:
                 break
 
             cv2.imshow("Webcam", frame)
-            key = cv2.waitKey(1) & 0xFF
+            key = cv2.waitKey(1) & 0xFF  # 0xFF masks the key to 8 bits
 
-            match key:
-                case ord("c"):
-                    self._save_image(frame)
-                case ord("q"):
-                    print("Quitting...")
-                    break
+            if key == ord("c"):
+                self._save_image(frame)
+            elif key == ord("q"):
+                print("Quitting...")
+                break
 
-    def _save_image(self, frame):
+        cv2.destroyAllWindows()
+
+    def _save_image(self, frame: cv2.VideoCapture) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = self.output_dir / f"image_{timestamp}.jpg"
-        cv2.imwrite(str(filename), frame)
+        filename = (
+            (self.output_dir / f"image_{timestamp}").with_suffix(".jpg").as_posix()
+        )
+        cv2.imwrite(filename, frame)
         print(f"Image saved: {filename}")
 
-    def release(self):
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_):
         self.cap.release()
         cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
     path_config = PathConfig()
-    config = CaptureConfig()
-    config.set_paths_from_config(path_config)
-    context = WebcamCaptureContext(config=config)
-    while True:
-        user_input = (
-            input("Enter command ('capture' to capture image, 'quit' to exit): ")
-            .strip()
-            .lower()
-        )
-        try:
-            command = Command(user_input)
-            context.execute(command)
-        except ValueError:
-            print(f"Invalid command: {user_input}")
+    config = CaptureConfig(output_dir=path_config.webcam_captue)
+    with config.setup_target() as webcam:
+        webcam.capture_image()
