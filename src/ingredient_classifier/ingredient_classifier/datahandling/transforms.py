@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import Dict, Tuple, Type
+from typing import Tuple, Type
 
 import albumentations as A
 import numpy as np
@@ -11,18 +11,18 @@ from torch import Tensor
 from litutils import BaseConfig
 
 
-class TransformType(Enum):
+class TransformsType(Enum):
     """
     Enumeration for different types of data transformations.
     """
 
     TRAIN_FROM_SCRATCH = auto()
     TRAIN_FINE_TUNE = auto()
-    VALID = auto()
+    VAL = auto()
 
 
-class TransformsConfig(BaseConfig):
-    target: Type["Transformations"] = Field(default_factory=lambda: Transformations)
+class TransformsConfig(BaseConfig["Transforms"]):
+    target: Type["Transforms"] = Field(default_factory=lambda: Transforms)
 
     img_size: int = 224
     rgb_means: Tuple[float, float, float] = (0.485, 0.456, 0.406)
@@ -30,10 +30,10 @@ class TransformsConfig(BaseConfig):
     rgb_stds: Tuple[float, float, float] = (0.229, 0.224, 0.225)
     """ImageNet standard deviation values for RGB channels."""
 
-    transform_type: TransformType = TransformType.TRAIN_FROM_SCRATCH
+    transform_type: TransformsType = TransformsType.TRAIN_FROM_SCRATCH
 
 
-class Transformations:
+class Transforms:
     def __init__(self, config: TransformsConfig):
         """
         Initializes transformations for different training stages.
@@ -43,11 +43,9 @@ class Transformations:
                 mean, and standard deviation for normalization.
         """
         self.config = config
-        self._pipeline = self.get_transform()
+        self._pipeline = self._create_transform()
 
-    def __call__(
-        self, X: np.ndarray, y: np.ndarray, transform_type: TransformType
-    ) -> Tuple[Tensor["3, H, W; float32"], Tensor["1; int64"]]:
+    def apply(self, X: np.ndarray, y: np.ndarray) -> Tuple[Tensor, Tensor]:
         """
         Applies the transformation based on the specified TransformType.
 
@@ -60,9 +58,11 @@ class Transformations:
                 The transformed image as a tensor in CHW format with float32 dtype,
                 and the label as an int64 tensor.
         """
-        transformed = self._pipeline(image=X)["image"]
-        y = torch.from_numpy(y).to(torch.int64).unsqueeze(0)
-        return transformed, y
+        return (
+            self._pipeline(image=X)["image"],
+            # torch.from_numpy(y).to(torch.int64).unsqueeze(0),
+            torch.tensor(y, dtype=torch.int64).unsqueeze(0),
+        )
 
     def _create_transform(self) -> A.Compose:
         """
@@ -72,29 +72,24 @@ class Transformations:
             A.Compose: The composed transformation pipeline.
         """
         match self.config.transform_type:
-            case TransformType.TRAIN_FROM_SCRATCH:
+            case TransformsType.TRAIN_FROM_SCRATCH:
                 return self._train_from_scratch_transform()
-            case TransformType.TRAIN_FINE_TUNE:
+            case TransformsType.TRAIN_FINE_TUNE:
                 return self._train_fine_tune_transform()
-            case TransformType.VALID:
-                return self._valid_transform()
+            case TransformsType.VAL:
+                return self._val_transform()
             case _:
                 raise ValueError(
                     f"Unknown transform type: {self.config.transform_type}"
                 )
 
     def _train_from_scratch_transform(self) -> A.Compose:
-        """
-        Transformation pipeline for training from scratch.
-
-        Returns:
-            A.Compose: The composed transformation pipeline including augmentations
-                and normalization suitable for training from scratch.
-        """
+        """Training from scratch pipeline with strong augmentations."""
         return A.Compose(
             [
+                A.SmallestMaxSize(max_size=self.config.img_size),
                 A.RandomResizedCrop(
-                    height=self.config.img_size,
+                    size=(self.config.img_size, self.config.img_size),
                     width=self.config.img_size,
                     scale=(0.08, 1.0),
                     ratio=(0.75, 1.3333),
@@ -112,18 +107,10 @@ class Transformations:
         )
 
     def _train_fine_tune_transform(self) -> A.Compose:
-        """
-        Transformation pipeline for fine-tuning pre-trained models.
-
-        Returns:
-            A.Compose: The composed transformation pipeline including resizing,
-                cropping, and normalization suitable for fine-tuning.
-        """
+        """Fine-tuning pipeline with lighter augmentations."""
         return A.Compose(
             [
-                A.Resize(
-                    height=self.config.img_size + 32, width=self.config.img_size + 32
-                ),
+                A.SmallestMaxSize(max_size=self.config.img_size),
                 A.CenterCrop(height=self.config.img_size, width=self.config.img_size),
                 A.HorizontalFlip(p=0.5),
                 A.Normalize(mean=self.config.rgb_means, std=self.config.rgb_stds),
@@ -131,19 +118,11 @@ class Transformations:
             ]
         )
 
-    def _valid_transform(self) -> A.Compose:
-        """
-        Transformation pipeline for validation.
-
-        Returns:
-            A.Compose: The composed transformation pipeline including resizing,
-                cropping, and normalization suitable for validation.
-        """
+    def _val_transform(self) -> A.Compose:
+        """Validation pipeline with deterministic transforms."""
         return A.Compose(
             [
-                A.Resize(
-                    height=self.config.img_size + 32, width=self.config.img_size + 32
-                ),
+                A.SmallestMaxSize(max_size=self.config.img_size),
                 A.CenterCrop(height=self.config.img_size, width=self.config.img_size),
                 A.Normalize(mean=self.config.rgb_means, std=self.config.rgb_stds),
                 ToTensorV2(),

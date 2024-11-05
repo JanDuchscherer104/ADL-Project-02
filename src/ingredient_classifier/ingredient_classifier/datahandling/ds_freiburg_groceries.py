@@ -21,13 +21,13 @@ class FreiburgGroceriesDatasetParams(BaseConfig["FreiburgGroceriesDataset"]):
         description="Path to dataset directory",
     )
     stage: Stage = Field(
-        default=Stage.TRAIN, description="Dataset stage (train/val/test)"
+        default=Stage.TRAIN, description="Dataset stage (TRAIN/VAL/TEST)"
     )
     transforms_type: TransformsType = TransformsType.TRAIN_FROM_SCRATCH
     transforms_config: Annotated[TransformsConfig, Field(None)]
 
     target: Type["FreiburgGroceriesDataset"] = Field(
-        default=lambda: FreiburgGroceriesDataset
+        default_factory=lambda: FreiburgGroceriesDataset
     )
 
     @field_validator("transforms_config", mode="before")
@@ -47,40 +47,62 @@ class FreiburgGroceriesDatasetParams(BaseConfig["FreiburgGroceriesDataset"]):
 
 
 class FreiburgGroceriesDataset(Dataset):
-    """PyTorch Dataset for Freiburg Groceries"""
+    """PyTorch Dataset for Freiburg Groceries with unified splits"""
 
     def __init__(self, params: FreiburgGroceriesDatasetParams):
-        """
-        Args:
-            params: Dataset parameters
-        """
+        """Initialize dataset with specified parameters."""
         self.params = params
         self.transforms = params.transforms_config.setup_target()
 
-        # Load split files
-        stage = "validation" if params.stage == Stage.VAL else params.stage.value[0]
-        split_file = self.params.data_dir / "splits" / f"{stage}.txt"
-        with split_file.open("r") as f:
-            self.image_paths = list(f.readlines())
+        # Map stage to split file name
+        split_map = {
+            Stage.TRAIN: "train.txt",
+            Stage.VAL: "val.txt",
+            Stage.TEST: "test.txt",
+        }
 
-        # Get class names from image paths
-        self.classes = sorted(
-            list(set(path.split("/")[0] for path in self.image_paths))
+        # Load split file
+        split_file = self.params.data_dir / "splits" / split_map[params.stage]
+        if not split_file.exists():
+            raise FileNotFoundError(f"Split file not found: {split_file}")
+
+        # Read and clean image paths
+        with split_file.open() as f:
+            self.samples = [
+                line.strip().split() for line in f.readlines() if line.strip()
+            ]
+
+        if not self.samples:
+            raise ValueError(f"No samples found in {split_file}")
+
+        # Extract paths and labels
+        self.image_paths, labels = zip(*self.samples)
+        self.labels: List[int] = list(map(int, labels))  # List[int]
+
+        # Get unique classes from paths
+        self.classes: List[str] = sorted(
+            list(set(map(lambda path: path.split("/")[0], self.image_paths)))
         )
-        self.class_to_idx = dict(zip(self.classes, range(len(self.classes))))
+        self.class_to_idx: Dict[str, int] = dict(
+            map((lambda x: (x[1], x[0])), enumerate(self.classes))
+        )
 
     def __len__(self) -> int:
+        """Return number of samples in dataset."""
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
+        """Get image and label for given index."""
         img_path = self.params.data_dir / "images" / self.image_paths[idx]
-        label = self.class_to_idx[self.image_paths[idx].split("/")[0]]
+        label = self.labels[idx]
 
-        # Load and transform image
-        image = cv2.imread(img_path.as_posix())
+        # Load and verify image
+        if (image := cv2.imread(img_path.as_posix())) is None:
+            raise RuntimeError(f"Failed to load image: {img_path}")
 
-        return self.transforms(X=image, y=label)  # type: ignore
+        return self.transforms.apply(X=cv2.cvtColor(image, cv2.COLOR_BGR2RGB), y=label)  # type: ignore
 
     @property
     def num_classes(self) -> int:
+        """Return number of classes in dataset."""
         return len(self.classes)

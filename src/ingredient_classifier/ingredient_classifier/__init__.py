@@ -1,3 +1,3 @@
-from .lit_module import ClassifierType, IngredientClassifierParams
+# from .lit_module import ClassifierType, IngredientClassifierParams
 
-__all__ = ["IngredientClassifierParams", "ClassifierType"]
+# __all__ = ["IngredientClassifierParams", "ClassifierType"]
