@@ -5,6 +5,8 @@ opencv-python
 pytorch-lightning
 torchmetrics
 tensorboard
+albumentations
+scikit-learn
 pandas
 optuna
 wandb
