@@ -81,7 +81,7 @@ class FreiburgGroceriesDataset(Dataset):
 
         # Get unique classes from paths
         self.classes: List[str] = sorted(
-            list(set(map(lambda path: path.split("/")[0], self.image_paths)))
+            list(set(map(lambda path: path.split("/")[0].lower(), self.image_paths)))
         )
         self.class_to_idx: Dict[str, int] = dict(
             map((lambda x: (x[1], x[0])), enumerate(self.classes))
