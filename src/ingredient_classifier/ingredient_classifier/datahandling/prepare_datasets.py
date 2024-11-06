@@ -86,7 +86,7 @@ class DatasetPrep:
                 self._transform_freiburg_splits()
             case DatasetType.FRU_VEG_KAGGLE:
                 self._normalize_vegfru_dir_names()
-
+                self._fix_png_profiles(dataset_type)
                 # remove corrupt sample
                 if (
                     pth := self.config.paths.data
@@ -155,6 +155,41 @@ class DatasetPrep:
         print(f"Train: {len(train_samples):>6,d} samples")
         print(f"Val:   {len(val_samples):>6,d} samples")
         print(f"Test:  {len(test_samples):>6,d} samples")
+
+    def _fix_png_profiles(self, dataset_type: DatasetType) -> None:
+        """Fix incorrect sRGB profiles in PNG files using ImageMagick's mogrify"""
+        # <https://stackoverflow.com/questions/22745076/libpng-warning-iccp-known-incorrect-srgb-profile/22747902#22747902>
+        dataset_path = self.config.paths.data / dataset_type.value
+        if not dataset_path.exists():
+            raise FileNotFoundError(f"Dataset path not found: {dataset_path}")
+
+        print(f"\nFixing PNG profiles in {dataset_path}")
+
+        # Find all directories containing PNGs using pathlib
+        png_dirs = {f.parent for f in dataset_path.rglob("*.png")}
+        if not png_dirs:
+            print("No PNG files found")
+            return
+
+        print(f"Found PNG files in {len(png_dirs)} directories")
+
+        # Process each directory
+        for dir_path in png_dirs:
+            try:
+                print(f"Processing {dir_path.relative_to(dataset_path)}...")
+
+                # Get absolute paths for all PNG files in directory
+                png_files = list(dir_path.glob("*.png"))
+                if png_files:
+                    # Convert Path objects to strings for subprocess
+                    png_paths = [str(f.absolute()) for f in png_files]
+                    run(["mogrify"] + png_paths, check=True, capture_output=True)
+
+            except Exception as e:
+                print(f"Error processing directory {dir_path}: {e}")
+                continue
+
+        print("✓ PNG profiles fixed")
 
     def _normalize_vegfru_dir_names(self):
         """Normalize directory names by replacing spaces with underscores in the VeGFru dataset"""
