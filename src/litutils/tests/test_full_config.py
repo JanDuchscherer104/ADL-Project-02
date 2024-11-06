@@ -1,10 +1,9 @@
 import unittest
 from unittest.mock import MagicMock
 
+from litflow.configs.config import _AbstractExperimentConfig
 from pydantic import BaseModel
 from pytorch_lightning import LightningDataModule, LightningModule
-
-from litflow.configs.config import _AbstractExperimentConfig
 
 # Mocking required components
 
@@ -51,16 +50,13 @@ class MyExperimentConfig(_AbstractExperimentConfig):
     datamodule_config = MyDataModuleConfig()
     datamodule_type = MyLightningDataModule
 
-    is_debug = False
     verbose = True
-    from_ckpt = None
     is_optuna = False
     is_mlflow = True
     max_epochs = 100
     early_stopping_patience = 5
     log_every_n_steps = 10
     is_gpu = True
-    matmul_precision = "high"
     is_fast_dev_run = False
 
     active_callbacks = {
