@@ -1,9 +1,7 @@
-from pathlib import Path
-from typing import Annotated, Dict, List, Optional, Tuple, Type, Union
+from typing import Dict, List, Optional, Tuple, Type
 
 import cv2
-import torch
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field
 from torch import Tensor
 from torch.utils.data import Dataset
 

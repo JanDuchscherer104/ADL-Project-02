@@ -1,170 +1,88 @@
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
-from torch.utils.data import Dataset
 from torchvision.utils import make_grid
+
+from .ds_combined_groceries import CombinedGroceryDataset
 
 
 class DatasetAnalyzer:
-    """Analysis tools for classification datasets with visualization focus on notebooks"""
+    """Analysis tools for classification datasets with visualization focus"""
 
-    def __init__(self, dataset: Dataset):
+    def __init__(self, dataset: CombinedGroceryDataset):
         """Initialize analyzer with dataset"""
         self.dataset = dataset
-        self.df = self._build_analysis_df()
 
         # Set style for all plots
         sns.set_style("whitegrid")
-        plt.rcParams["figure.figsize"] = [10, 6]
+        plt.rcParams["figure.figsize"] = [12, 6]
 
-    @staticmethod
-    def calculate_normalization_stats(
-        dataset: Dataset, num_samples: int = 1000
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Calculate dataset mean and std for normalization
+    def get_class_distribution(self) -> np.ndarray:
+        """Calculate normalized class distribution vector"""
+        # Count samples per class
+        label_counts = torch.zeros(self.dataset.num_classes)
+        for _, label in self.dataset:
+            label_val = label.item() if isinstance(label, torch.Tensor) else label
+            label_counts[label_val] += 1
 
-        Args:
-            dataset: Dataset to analyze
-            num_samples: Number of random samples to use
+        # Normalize
+        return (label_counts / len(self.dataset)).numpy()  # type: ignore
 
-        Returns:
-            Tuple of (mean, std) arrays with shape (num_channels,)
+    def plot_class_distribution(self, figsize=(12, 6)):
+        """Plot normalized class distribution"""
+        dist = self.get_class_distribution()
+
+        plt.figure(figsize=figsize)
+        plt.bar(range(len(dist)), dist)
+        plt.xticks(range(len(dist)), self.dataset.classes, rotation=45, ha="right")
+        plt.title("Normalized Class Distribution")
+        plt.ylabel("Fraction of Samples")
+        plt.tight_layout()
+        plt.show()
+
+    def calculate_channel_stats(self) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+        """Calculate per-dataset channel mean and std for RGB images
+
+        Computes per-image statistics first, then averages across dataset
         """
-        indices = np.random.choice(len(dataset), min(num_samples, len(dataset)))
-        images = []
+        assert self.dataset.params.apply_transforms is False
+        dataset = self.dataset
+
+        image_means = []
+        image_stds = []
+
+        # Sample indices randomly
+        indices = torch.randperm(len(dataset))
 
         for idx in indices:
             img, _ = dataset[idx]
-            if isinstance(img, torch.Tensor):
-                images.append(img.numpy())
-            else:
-                images.append(img)
 
-        images = np.stack(images)
+            # Skip grayscale
+            if len(img.shape) == 2 or (len(img.shape) == 3 and img.shape[0] == 1):
+                continue
 
-        # Calculate per-channel stats
-        mean = images.mean(axis=(0, 2, 3))
-        std = images.std(axis=(0, 2, 3))
+            # Handle CHW -> HWC conversion
+            if len(img.shape) == 3 and img.shape[0] == 3:
+                img = np.transpose(img, (1, 2, 0))
 
-        return mean, std
+            # Convert to float if necessary
+            if img.dtype == np.uint8 or img.max() > 1.0:
+                img = img.astype(np.float32) / 255.0
 
-    def _build_analysis_df(self) -> pd.DataFrame:
-        """Convert dataset samples to pandas DataFrame"""
-        data = []
-        for idx in range(len(self.dataset)):
-            img, label = self.dataset[idx]
+            # Compute per-image stats (on HWC format)
+            img_mean = np.mean(img, axis=(0, 1))  # mean per channel
+            img_std = np.std(img, axis=(0, 1))  # std per channel
 
-            # Get source dataset info
-            source_idx = (
-                self.dataset.valid_samples[idx][0]
-                if hasattr(self.dataset, "valid_samples")
-                else None
-            )
-            source = (
-                "Freiburg"
-                if source_idx == 0
-                else "FruitVeg" if source_idx == 1 else "Unknown"
-            )
+            image_means.append(img_mean)
+            image_stds.append(img_std)
 
-            # Get class name
-            class_name = (
-                self.dataset.classes[
-                    label.item() if isinstance(label, torch.Tensor) else label
-                ]
-                if hasattr(self.dataset, "classes")
-                else str(label)
-            )
+        mean = np.mean(image_means, axis=0)
+        std = np.mean(image_stds, axis=0)
 
-            # Image statistics
-            if isinstance(img, torch.Tensor):
-                channels = [img[i].mean().item() for i in range(img.shape[0])]
-            else:
-                channels = [img[:, :, i].mean() for i in range(img.shape[-1])]
-
-            data.append(
-                {
-                    "class": class_name,
-                    "source": source,
-                    "mean_r": channels[0],
-                    "mean_g": channels[1],
-                    "mean_b": channels[2],
-                }
-            )
-
-        return pd.DataFrame(data)
-
-    def show_class_distribution(self):
-        """Display class distribution plot"""
-        plt.figure()
-        g = sns.countplot(
-            data=self.df,
-            y="class",
-            order=self.df["class"].value_counts().index,
-            hue="source",
-        )
-        g.set_title("Sample Distribution Across Classes")
-        plt.tight_layout()
-        plt.show()
-
-    def show_channel_distributions(self):
-        """Display RGB channel distributions"""
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        channels = ["mean_r", "mean_g", "mean_b"]
-
-        for ax, channel in zip(axes, channels):
-            sns.kdeplot(data=self.df, x=channel, hue="class", ax=ax)
-            ax.set_title(f'{channel.split("_")[1].upper()} Channel Distribution')
-
-        plt.tight_layout()
-        plt.show()
-
-    def show_class_statistics(self):
-        """Display per-class channel statistics"""
-        stats = (
-            self.df.groupby("class")
-            .agg(
-                {
-                    "mean_r": ["mean", "std"],
-                    "mean_g": ["mean", "std"],
-                    "mean_b": ["mean", "std"],
-                }
-            )
-            .round(3)
-        )
-
-        return stats
-
-    def summarize(self):
-        """Print comprehensive dataset summary"""
-        print(f"Total samples: {len(self.df)}")
-        print(f"Number of classes: {self.df['class'].nunique()}")
-        print("\nClass distribution:")
-        print(self.df["class"].value_counts())
-        print("\nSource distribution:")
-        print(self.df["source"].value_counts())
-        print("\nPer-channel statistics:")
-        print(self.show_class_statistics())
-
-
-# Example notebook usage:
-"""
-dataset = CompositeGroceryDataset(params)
-analyzer = DatasetAnalyzer(dataset)
-
-# Get normalization parameters
-mean, std = DatasetAnalyzer.calculate_normalization_stats(dataset)
-print(f"Dataset mean: {mean}")
-print(f"Dataset std: {std}")
-
-# Show interactive visualizations
-analyzer.show_class_distribution()
-analyzer.show_channel_distributions()
-
-# Get summary statistics
-analyzer.summarize()
-"""
+        return {"mean": mean, "std": std}

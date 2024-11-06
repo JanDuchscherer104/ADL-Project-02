@@ -15,18 +15,19 @@ from .ds_fruit_veg import FruitVegDatasetParams
 from .transforms import TransformsConfig, TransformsType
 
 
-class CompositeDatasetParams(BaseConfig["CompositeGroceryDataset"]):
+class GroceryDatasetConfig(BaseConfig["CombinedGroceryDataset"]):
     """Parameters for CompositeDataset"""
 
     paths: PathConfig = Field(default_factory=PathConfig)
 
     stage: Stage = Field(default=Stage.TRAIN)
 
-    from_metadata: bool = False
+    from_metadata: bool = True
     """Load dataset from saved metadata instead of building mappings"""
-    save_metadata: bool = True
+    save_metadata: bool = False
     """Wheter to save metadata after building mappings"""
 
+    apply_transforms: bool = True
     transforms_type: TransformsType = TransformsType.TRAIN_FROM_SCRATCH
     transforms_config: Annotated[TransformsConfig, Field(None)]
 
@@ -54,8 +55,8 @@ class CompositeDatasetParams(BaseConfig["CompositeGroceryDataset"]):
         description="Classes to exclude - processed foods and beverages",
     )
 
-    target: Type["CompositeGroceryDataset"] = Field(
-        default_factory=lambda: CompositeGroceryDataset
+    target: Type["CombinedGroceryDataset"] = Field(
+        default_factory=lambda: CombinedGroceryDataset
     )
 
     @field_validator("transforms_config", mode="before")
@@ -109,7 +110,7 @@ class CompositeDatasetParams(BaseConfig["CompositeGroceryDataset"]):
         return self.metadata_dir / f"{self.stage.value[0]}_samples.csv"
 
 
-class CompositeGroceryDataset(Dataset):
+class CombinedGroceryDataset(Dataset):
     """Efficiently combines and filters multiple grocery datasets with consistent class mapping"""
 
     CLASS_MAPPING = {
@@ -121,7 +122,7 @@ class CompositeGroceryDataset(Dataset):
         "tomato_sauce": "tomato",
     }
 
-    def __init__(self, params: CompositeDatasetParams) -> None:
+    def __init__(self, params: GroceryDatasetConfig) -> None:
         self.params = params
         self.transforms = params.transforms_config.setup_target()
 
@@ -132,15 +133,14 @@ class CompositeGroceryDataset(Dataset):
         # Init mappings and samples
         if params.from_metadata:
             CONSOLE.log(f"Loading {params.stage} dataset from metadata...")
-            CONSOLE.warn(
-                f"If changes were made to CompositeGroceryDataset.datasets, set from_metadata=False"
-            )
 
             self.classes, self.class_to_idx, self.idx_to_class, self.samples = (
                 self._load_from_metadata()
             )
         else:
-            CONSOLE.log(f"Building dataset mappings for split {params.stage}...")
+            CONSOLE.log(
+                f"Building dataset mappings for split {params.stage} - this will iterate over all samples, may take a while..."
+            )
             self.classes, self.class_to_idx, self.idx_to_class, self.samples = (
                 self._build_mappings()
             )
@@ -311,7 +311,11 @@ class CompositeGroceryDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
         dataset_idx, sample_idx, target_class = self.samples[idx]
         img, _ = self.datasets[dataset_idx][sample_idx]
-        return self.transforms(X=img, y=target_class)  # type: ignore
+        return (  # type: ignore
+            self.transforms(X=img, y=target_class)
+            if self.params.apply_transforms
+            else (img, target_class)
+        )
 
     @property
     def num_classes(self) -> int:

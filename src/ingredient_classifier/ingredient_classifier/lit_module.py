@@ -34,31 +34,10 @@ class ImgClassifierParams(BaseConfig["LitImageClassifierModule"]):
         default_factory=lambda: LitImageClassifierModule
     )
 
+    num_classes: int = 46
     model: "ModelType" = Field(default_factory=lambda: ModelType.ALEXNET)
-    model_params: Optional[Union[AlexNetParams]] = None
-    num_classes: int = 10
     batch_size: int = 32
     optimizer_config: OptimizerConfig = Field(default_factory=OptimizerConfig)
-
-    @field_validator("model_params")
-    @classmethod
-    def __model_params(
-        cls, v: Union[AlexNetParams], info: ValidationInfo
-    ) -> Union[AlexNetParams]:
-        match info.data["model"]:
-            case ModelType.ALEXNET:
-                if v is None:
-                    model_params = AlexNetParams(num_classes=info.data["num_classes"])
-                elif isinstance(v, AlexNetParams):
-                    model_params = v
-                    model_params.num_classes = info.data["num_classes"]
-                else:
-                    raise ValueError(f"Invalid model parameters: {v}")
-            case _:
-                raise NotImplementedError(
-                    f"Model type {info.data['model']} not implemented"
-                )
-        return model_params
 
 
 # Define the model type enumeration
@@ -71,16 +50,22 @@ class ModelType(Enum):
     def setup_target(cls, params: "ImgClassifierParams") -> nn.Module:
         match params.model:
             case cls.ALEXNET:
-                return AlexNetParams().setup_target()
+                return AlexNetParams(num_classes=params.num_classes).setup_target()
             case cls.RESNET50:
-                # Instantiate ResNet50 with ImageNet weights
-                model = models.resnet50(pretrained=True)
+                # Instantiate ResNet50 with ImageNet weights (V1: acc@1 76.13, V2: acc@1 80.86)
+                model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+                # self.fc = nn.Linear(512 * block.expansion, num_classes)
                 model.fc = nn.Linear(model.fc.in_features, params.num_classes)
                 return model
             case cls.VISION_TRANSFORMER:
                 # Instantiate Vision Transformer with ImageNet weights
-                model = models.vit_b_16(pretrained=True)
-                model.heads = nn.Linear(model.heads.in_features, params.num_classes)
+                model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
+                # if representation_size is None:
+                #     heads_layers["head"] = nn.Linear(hidden_dim, num_classes)
+                # ...
+                # self.heads = nn.Sequential(heads_layers)
+                # Use representation_size = None, as it is the default value
+                model.heads = nn.Linear(model.hidden_dim, params.num_classes)
                 return model
             case _:
                 raise NotImplementedError(f"Model type {params.model} not implemented")
@@ -104,7 +89,8 @@ class LitImageClassifierModule(pl.LightningModule):
             task="multiclass", num_classes=self.params.num_classes
         )
         self.confusion_matrix = torchmetrics.ConfusionMatrix(
-            num_classes=self.params.num_classes
+            num_classes=self.params.num_classes,
+            task="multiclass",
         )
 
     def forward(self, x: Tensor) -> Tensor:

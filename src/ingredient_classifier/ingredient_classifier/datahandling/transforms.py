@@ -26,9 +26,17 @@ class TransformsConfig(BaseConfig["Transforms"]):
     target: Type["Transforms"] = Field(default_factory=lambda: Transforms)
 
     img_size: int = 224
-    rgb_means: Tuple[float, float, float] = (0.485, 0.456, 0.406)
+    rgb_means: Tuple[float, float, float] = (
+        0.5888754,
+        0.53425103,
+        0.41462088,
+    )  # (0.485, 0.456, 0.406)
     """ImageNet mean values for RGB channels."""
-    rgb_stds: Tuple[float, float, float] = (0.229, 0.224, 0.225)
+    rgb_stds: Tuple[float, float, float] = (
+        0.23366731,
+        0.23470095,
+        0.24934198,
+    )  # (0.229, 0.224, 0.225)
     """ImageNet standard deviation values for RGB channels."""
 
     transform_type: TransformsType = TransformsType.TRAIN_FROM_SCRATCH
@@ -85,22 +93,27 @@ class Transforms:
                 )
 
     def _train_from_scratch_transform(self) -> A.Compose:
-        """Training from scratch pipeline with strong augmentations."""
         return A.Compose(
             [
                 A.SmallestMaxSize(max_size=self.config.img_size),
                 A.RandomResizedCrop(
-                    size=(self.config.img_size, self.config.img_size),
                     width=self.config.img_size,
+                    height=self.config.img_size,
                     scale=(0.08, 1.0),
                     ratio=(0.75, 1.3333),
                     p=1.0,
                 ),
                 A.HorizontalFlip(p=0.5),
+                A.RandomRotate90(p=0.5),
+                A.GaussNoise(var_limit=(10.0, 50.0), p=0.5),
+                A.CoarseDropout(max_holes=8, max_height=16, max_width=16, p=0.5),
+                A.RandomBrightnessContrast(
+                    brightness_limit=0.2, contrast_limit=0.2, p=0.5
+                ),
+                A.Perspective(scale=(0.05, 0.1), p=0.5),
                 A.ColorJitter(
                     brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1, p=0.8
                 ),
-                A.ToGray(p=0.1),
                 A.GaussianBlur(blur_limit=(3, 7), p=0.5),
                 A.Normalize(mean=self.config.rgb_means, std=self.config.rgb_stds),
                 ToTensorV2(),
@@ -112,8 +125,20 @@ class Transforms:
         return A.Compose(
             [
                 A.SmallestMaxSize(max_size=self.config.img_size),
-                A.CenterCrop(height=self.config.img_size, width=self.config.img_size),
+                A.RandomResizedCrop(
+                    height=self.config.img_size,
+                    width=self.config.img_size,
+                    scale=(0.8, 1.0),
+                    ratio=(0.9, 1.1),
+                    p=1.0,
+                ),
                 A.HorizontalFlip(p=0.5),
+                A.RandomBrightnessContrast(
+                    brightness_limit=0.1, contrast_limit=0.1, p=0.3
+                ),
+                A.HueSaturationValue(
+                    hue_shift_limit=5, sat_shift_limit=5, val_shift_limit=5, p=0.3
+                ),
                 A.Normalize(mean=self.config.rgb_means, std=self.config.rgb_stds),
                 ToTensorV2(),
             ]
