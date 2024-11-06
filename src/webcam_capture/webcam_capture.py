@@ -10,7 +10,7 @@ from litutils.utils import BaseConfig
 
 
 class CaptureConfig(BaseConfig):
-    output_dir: Path
+    paths: PathConfig = Field(default_factory=PathConfig)
     camera_index: int = 0
     target: Type["Webcam"] = Field(
         default_factory=lambda: Webcam,
@@ -21,7 +21,6 @@ class CaptureConfig(BaseConfig):
 class Webcam:
     def __init__(self, config: CaptureConfig) -> None:
         self.config = config
-        self.output_dir = config.output_dir
         self.cap = cv2.VideoCapture(self.config.camera_index)
         if not self.cap.isOpened():
             raise RuntimeError(
@@ -50,7 +49,7 @@ class Webcam:
     def _save_image(self, frame: cv2.VideoCapture) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = (
-            (self.output_dir / f"image_{timestamp}")
+            (self.config.paths.webcam_capture / f"image_{timestamp}")
             .absolute()
             .with_suffix(".jpg")
             .as_posix()
@@ -67,7 +66,6 @@ class Webcam:
 
 
 if __name__ == "__main__":
-    path_config = PathConfig()
-    config = CaptureConfig(output_dir=path_config.webcam_captue)
+    config = CaptureConfig()
     with config.setup_target() as webcam:
         webcam.capture_image()
