@@ -33,7 +33,7 @@ class DatasetPrepConfig(BaseConfig):
     datasets_tf_stages: Dict[DatasetType, PrepStage] = Field(
         default_factory=lambda: {
             DatasetType.FREIBURG_GROCERIES: PrepStage.NONE,
-            DatasetType.FRU_VEG_KAGGLE: PrepStage.NONE,
+            DatasetType.FRU_VEG_KAGGLE: PrepStage.TRANSFORM,
         }
     )
     val_to_test_ratio: float = 0.5
@@ -84,6 +84,17 @@ class DatasetPrep:
         match dataset_type:
             case DatasetType.FREIBURG_GROCERIES:
                 self._transform_freiburg_splits()
+            case DatasetType.FRU_VEG_KAGGLE:
+                self._normalize_vegfru_dir_names()
+
+                # remove corrupt sample
+                if (
+                    pth := self.config.paths.data
+                    / DatasetType.FRU_VEG_KAGGLE.value
+                    / "train/bell_pepper/Image_56.jpg"
+                ).exists():
+                    pth.unlink()
+                    print("Removed corrupt sample")
             case _:
                 print(f"No split transformation needed for {dataset_type}")
 
@@ -145,6 +156,26 @@ class DatasetPrep:
         print(f"Val:   {len(val_samples):>6,d} samples")
         print(f"Test:  {len(test_samples):>6,d} samples")
 
+    def _normalize_vegfru_dir_names(self):
+        """Normalize directory names by replacing spaces with underscores in the VeGFru dataset"""
+        splits = ["train", "validation", "test"]
+        for split in splits:
+            dataset_path = (
+                self.config.paths.data / DatasetType.FRU_VEG_KAGGLE.value / split
+            )
+            if not dataset_path.exists():
+                raise FileNotFoundError(f"Dataset path not found: {dataset_path}")
+
+            for class_dir in dataset_path.iterdir():
+                if class_dir.is_dir():
+                    new_name = class_dir.name.replace(" ", "_")
+                    new_dir = class_dir.parent / new_name
+                    if new_name != class_dir.name and not new_dir.exists():
+                        class_dir.rename(new_dir)
+                        print(f"Renamed '{class_dir.name}' to '{new_name}'")
+
+        print("Directory names normalized in VeGFru dataset")
+
     def _download_and_extract_tar_gz(
         self, url: str, dataset_path: Path, filename: str
     ) -> None:
@@ -170,9 +201,9 @@ class DatasetPrep:
         dataset_path.mkdir(parents=True, exist_ok=True)
 
         # Download and extract main dataset
-        # self._download_and_extract_file(
-        #     FREIBURG_URLS["dataset"], dataset_path, "dataset.tar.gz"
-        # )
+        self._download_and_extract_file(
+            FREIBURG_URLS["dataset"], dataset_path, "dataset.tar.gz"
+        )
 
         # Download and extract splits
         self._download_and_extract_tar_gz(

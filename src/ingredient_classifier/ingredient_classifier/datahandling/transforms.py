@@ -19,6 +19,7 @@ class TransformsType(Enum):
     TRAIN_FROM_SCRATCH = auto()
     TRAIN_FINE_TUNE = auto()
     VAL = auto()
+    IDENT = auto()
 
 
 class TransformsConfig(BaseConfig["Transforms"]):
@@ -45,7 +46,7 @@ class Transforms:
         self.config = config
         self._pipeline = self._create_transform()
 
-    def apply(self, X: np.ndarray, y: np.ndarray) -> Tuple[Tensor, Tensor]:
+    def __call__(self, X: np.ndarray, y: np.ndarray) -> Tuple[Tensor, Tensor]:
         """
         Applies the transformation based on the specified TransformType.
 

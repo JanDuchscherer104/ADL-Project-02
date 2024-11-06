@@ -1,38 +1,42 @@
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, Type
 
 import cv2
-from pydantic import BaseModel, Field
+from pydantic import Field, ValidationInfo, field_validator
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from litutils import Stage
+from litutils import BaseConfig, PathConfig, Stage
 
 from .transforms import Transforms, TransformsConfig, TransformsType
 
 
-class FruitVegDatasetParams(BaseModel):
+class FruitVegDatasetParams(BaseConfig["FruitVegDataset"]):
     """Parameters for FruitVegDataset"""
 
-    data_dir: Path = Field(default=Path(".data/fruit-and-vegetable-image-recognition"))
+    paths: PathConfig = Field(default_factory=PathConfig)
     stage: Stage = Stage.TRAIN
-    transforms_type: TransformsType = TransformsType.TRAIN_FROM_SCRATCH
+
+    target: Type["FruitVegDataset"] = Field(default_factory=lambda: FruitVegDataset)
 
 
 class FruitVegDataset(Dataset):
     """Dataset for Fruit and Vegetable Image Recognition"""
 
-    def __init__(self, params: FruitVegDatasetParams):
+    def __init__(
+        self,
+        params: FruitVegDatasetParams,
+        transforms: Optional[Transforms] = None,
+    ):
         """
         Args:
             params (FruitVegDatasetParams): Dataset parameters
         """
         self.params = params
-        self.data_dir = params.data_dir
+        self.data_dir = params.paths.data / "fruit-and-vegetable-image-recognition"
 
         # Set up transforms
-        transform_config = TransformsConfig(transform_type=params.transforms_type)
-        self.transforms = Transforms(transform_config)
+        self.transforms = transforms or (lambda *x: x)
 
         # Get split directory based on stage
         split_mapping = {
@@ -46,12 +50,15 @@ class FruitVegDataset(Dataset):
             raise RuntimeError(f"Split directory not found: {self.split_dir}")
 
         self.classes: List[str] = sorted(
-            [d.name.replace(" ", "_") for d in self.split_dir.iterdir() if d.is_dir()]
+            [d.name for d in self.split_dir.iterdir() if d.is_dir()]
         )
 
         self.class_to_idx: Dict[str, int] = {
             cls_name: i for i, cls_name in enumerate(self.classes)
         }
+        self.idx_to_class: Dict[int, str] = dict(
+            map(reversed, self.class_to_idx.items())  # type: ignore
+        )
 
         # Collect all image paths and their labels
         self.samples: List[Tuple[Path, int]] = []
@@ -82,4 +89,4 @@ class FruitVegDataset(Dataset):
             raise RuntimeError(f"Failed to load image: {img_path}")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        return self.transforms.apply(image, label)  # type: ignore
+        return self.transforms(image, label)  # type: ignore

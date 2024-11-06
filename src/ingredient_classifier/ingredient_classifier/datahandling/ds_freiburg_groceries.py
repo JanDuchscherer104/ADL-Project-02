@@ -9,50 +9,37 @@ from torch.utils.data import Dataset
 
 from litutils import BaseConfig, PathConfig, Stage
 
-from .transforms import TransformsConfig, TransformsType
+from .transforms import Transforms
 
 
 class FreiburgGroceriesDatasetParams(BaseConfig["FreiburgGroceriesDataset"]):
     """Parameters for FreiburgGroceriesDataset"""
 
     paths: PathConfig = Field(default_factory=PathConfig)
-    data_dir: Path = Field(
-        default=Path(".data/freiburg_groceries"),
-        description="Path to dataset directory",
-    )
     stage: Stage = Field(
         default=Stage.TRAIN, description="Dataset stage (TRAIN/VAL/TEST)"
     )
-    transforms_type: TransformsType = TransformsType.TRAIN_FROM_SCRATCH
-    transforms_config: Annotated[TransformsConfig, Field(None)]
 
     target: Type["FreiburgGroceriesDataset"] = Field(
         default_factory=lambda: FreiburgGroceriesDataset
     )
 
-    @field_validator("transforms_config", mode="before")
-    @classmethod
-    def __init_transforms_config(cls, _, info: ValidationInfo) -> TransformsConfig:
-        tf_type = info.data["transforms_type"]
-        match info.data["stage"]:
-            case Stage.TRAIN:
-                assert tf_type in {
-                    TransformsType.TRAIN_FROM_SCRATCH,
-                    TransformsType.TRAIN_FINE_TUNE,
-                }
-                return TransformsConfig(transform_type=tf_type)
-            case Stage.VAL | Stage.TEST:
-                assert tf_type == TransformsType.VAL
-                return TransformsConfig(stage=tf_type)
-
 
 class FreiburgGroceriesDataset(Dataset):
     """PyTorch Dataset for Freiburg Groceries with unified splits"""
 
-    def __init__(self, params: FreiburgGroceriesDatasetParams):
+    def __init__(
+        self,
+        params: FreiburgGroceriesDatasetParams,
+        transforms: Optional[Transforms] = None,
+    ):
         """Initialize dataset with specified parameters."""
         self.params = params
-        self.transforms = params.transforms_config.setup_target()
+        self.data_dir = params.paths.data / "freiburg_groceries"
+        assert self.data_dir.exists(), f"Data directory not found: {self.data_dir}"
+
+        # transforms or identiy function
+        self.transforms = transforms or (lambda *x: x)
 
         # Map stage to split file name
         split_map = {
@@ -62,45 +49,56 @@ class FreiburgGroceriesDataset(Dataset):
         }
 
         # Load split file
-        split_file = self.params.data_dir / "splits" / split_map[params.stage]
+        split_file = self.data_dir / "splits" / split_map[params.stage]
         if not split_file.exists():
             raise FileNotFoundError(f"Split file not found: {split_file}")
 
+        def process_line(line):
+            parts = line.strip().split()
+            if parts:  # Skip empty lines
+                path, label = parts  # Unpack into label and remaining path parts
+                return (path, int(label))
+            return None
+
         # Read and clean image paths
         with split_file.open() as f:
-            self.samples = [
-                line.strip().split() for line in f.readlines() if line.strip()
-            ]
+            self.samples: List[Tuple[str, int]] = list(
+                filter(None, map(process_line, f.readlines()))
+            )
 
         if not self.samples:
             raise ValueError(f"No samples found in {split_file}")
 
-        # Extract paths and labels
-        self.image_paths, labels = zip(*self.samples)
-        self.labels: List[int] = list(map(int, labels))  # List[int]
-
-        # Get unique classes from paths
-        self.classes: List[str] = sorted(
-            list(set(map(lambda path: path.split("/")[0].lower(), self.image_paths)))
-        )
+        # Create class index mapping
         self.class_to_idx: Dict[str, int] = dict(
-            map((lambda x: (x[1], x[0])), enumerate(self.classes))
+            map(lambda t: (t[0].split("/")[0], int(t[1])), self.samples)
         )
+        self.idx_to_class: Dict[int, str] = dict(
+            map(reversed, self.class_to_idx.items())  # type: ignore
+        )
+
+        # Sort based on the class index
+        self.classes = [
+            class_name
+            for class_name, _ in sorted(self.class_to_idx.items(), key=lambda x: x[1])
+        ]
 
     def __len__(self) -> int:
         """Return number of samples in dataset."""
-        return len(self.image_paths)
+        return len(self.samples)
 
     def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
         """Get image and label for given index."""
-        img_path = self.params.data_dir / "images" / self.image_paths[idx]
-        label = self.labels[idx]
+        img_path, label = self.samples[idx]
+        img_path = self.data_dir / "images" / img_path
 
-        # Load and verify image
-        if (image := cv2.imread(img_path.as_posix())) is None:
+        # Load image
+        image = cv2.imread(img_path.as_posix())  # type: ignore
+        if image is None:
             raise RuntimeError(f"Failed to load image: {img_path}")
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        return self.transforms.apply(X=cv2.cvtColor(image, cv2.COLOR_BGR2RGB), y=label)  # type: ignore
+        return self.transforms(image, label)  # type: ignore
 
     @property
     def num_classes(self) -> int:
