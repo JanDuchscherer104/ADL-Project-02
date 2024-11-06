@@ -1,11 +1,11 @@
 from enum import Enum, auto
-from typing import Any, Dict, Optional, Tuple, Type, Union
+from typing import Any, Dict, Tuple, Type, Union
 
 import pytorch_lightning as pl
 import torch
 import torchmetrics
 import torchvision.models as models
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field
 from pytorch_lightning.loggers import WandbLogger
 from torch import Tensor, nn
 from torch.optim import AdamW, Optimizer
@@ -17,10 +17,9 @@ from .alexnet import AlexNetParams
 
 
 class OptimizerConfig(BaseConfig):
-    optimizer_type: str = "AdamW"
-    learning_rate: float = 0.001
-    weight_decay: float = 0.01
-    lr_max: float = 0.1
+    learning_rate: float = 5e-4
+    weight_decay: float = 1e-4
+    lr_max: float = 0.01
     base_momentum: float = 0.85
     max_momentum: float = 0.95
     div_factor: float = 25.0
@@ -38,6 +37,7 @@ class ImgClassifierParams(BaseConfig["LitImageClassifierModule"]):
     model: "ModelType" = Field(default_factory=lambda: ModelType.ALEXNET)
     batch_size: int = 32
     optimizer_config: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    train_head_only: bool = False
 
 
 # Define the model type enumeration
@@ -54,6 +54,10 @@ class ModelType(Enum):
             case cls.RESNET50:
                 # Instantiate ResNet50 with ImageNet weights (V1: acc@1 76.13, V2: acc@1 80.86)
                 model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+                if params.train_head_only:
+                    for param in model.parameters():
+                        param.requires_grad = False
+
                 # self.fc = nn.Linear(512 * block.expansion, num_classes)
                 model.fc = nn.Linear(model.fc.in_features, params.num_classes)
                 return model
@@ -65,6 +69,9 @@ class ModelType(Enum):
                 # ...
                 # self.heads = nn.Sequential(heads_layers)
                 # Use representation_size = None, as it is the default value
+                if params.train_head_only:
+                    for param in model.parameters():
+                        param.requires_grad = False
                 model.heads = nn.Linear(model.hidden_dim, params.num_classes)
                 return model
             case _:
@@ -102,7 +109,7 @@ class LitImageClassifierModule(pl.LightningModule):
         loss = self.loss_fn(y_hat, y)
 
         # Log training metrics
-        acc = self.train_accuracy(y_hat, y)
+        acc = self.train_accuracy(y_hat, y)  # applies argmax internally
         self.log("train_loss", loss, prog_bar=True, on_epoch=True, on_step=True)
         self.log("train_accuracy", acc, prog_bar=True, on_step=True)
 
@@ -115,11 +122,45 @@ class LitImageClassifierModule(pl.LightningModule):
 
         # Log validation metrics
         acc = self.val_accuracy(y_hat, y)
-        self.log("val_loss", loss, prog_bar=True, on_epoch=True)
-        self.log("val_accuracy", acc, prog_bar=True, on_epoch=True)
-        self.log("val_confusion_matrix", self.confusion_matrix(y_hat, y))
+        self.log(
+            "val_loss", loss, prog_bar=True, on_epoch=True, on_step=False, logger=True
+        )
+        self.log(
+            "val_accuracy",
+            acc,
+            prog_bar=True,
+            on_epoch=True,
+            on_step=False,
+        )
+
+        # Update confusion matrix
+        # self.confusion_matrix.update(y_hat, y)
+
+    def on_validation_epoch_end(self):
+        # Get confusion matrix
+        # cm = self.confusion_matrix.compute().cpu().numpy()
+
+        # Create figure
+        # plt.figure(figsize=(10, 10))
+        # sns.heatmap(cm, annot=True, fmt="g", cmap="Blues")
+        # plt.xlabel("Predicted")
+        # plt.ylabel("True")
+        # plt.title("Confusion Matrix")
+
+        # # Log to wandb if using WandbLogger
+        # if isinstance(self.logger, WandbLogger):
+        #     self.logger.experiment.log(
+        #         {"confusion_matrix": wandb.Image(plt), "global_step": self.global_step}
+        #     )
+
+        # plt.close()
+
+        # # Reset confusion matrix for next epoch
+        # self.confusion_matrix.reset()
+        ...
 
     def configure_optimizers(self) -> Dict[str, Union[Optimizer, Dict[str, Any]]]:
+
         optimizer_config = self.params.optimizer_config
         optimizer = AdamW(
             params=self.model.parameters(),
@@ -144,16 +185,10 @@ class LitImageClassifierModule(pl.LightningModule):
             "lr_scheduler": {
                 "scheduler": lr_scheduler,
                 "interval": "step",
-                "frequency": 1,
+                "frequency": 10,
                 "monitor": "val_loss",
             },
         }
-
-    def _calculate_accuracy(self, logits: Tensor, labels: Tensor) -> float:
-        preds = torch.argmax(logits, dim=1)
-        correct = (preds == labels).sum().item()
-        accuracy = correct / labels.size(0)
-        return accuracy
 
     def on_train_start(self) -> None:
         # Optional MLflow Integration

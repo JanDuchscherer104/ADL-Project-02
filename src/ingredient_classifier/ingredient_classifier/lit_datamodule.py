@@ -32,8 +32,12 @@ class LitDataModule(pl.LightningDataModule):
         super().__init__()
         self.config = config
 
+        self.train_ds = None
+        self.val_ds = None
+        self.test_ds = None
+
     def setup(self, stage: Optional[str] = None):
-        split = Stage.from_str(stage)
+        split = Stage.from_str(stage) if isinstance(stage, str) else stage
         match split:
             case Stage.TRAIN:
                 self.train_ds = self.config.train_ds.setup_target()
@@ -45,6 +49,7 @@ class LitDataModule(pl.LightningDataModule):
                 raise ValueError(f"Invalid stage: {stage}")
 
     def train_dataloader(self) -> DataLoader:
+        self.train_ds or self.setup(Stage.TRAIN)
         return DataLoader(
             self.train_ds,
             batch_size=self.config.batch_size,
@@ -53,6 +58,7 @@ class LitDataModule(pl.LightningDataModule):
         )
 
     def val_dataloader(self) -> DataLoader:
+        self.val_ds or self.setup(Stage.VAL)
         return DataLoader(
             self.val_ds,
             batch_size=self.config.batch_size,
@@ -60,6 +66,7 @@ class LitDataModule(pl.LightningDataModule):
         )
 
     def test_dataloader(self) -> DataLoader:
+        self.test_ds or self.setup(Stage.TEST)
         return DataLoader(
             self.test_ds,
             batch_size=self.config.batch_size,

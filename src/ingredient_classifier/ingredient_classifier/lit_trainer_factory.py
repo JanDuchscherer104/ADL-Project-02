@@ -1,9 +1,8 @@
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
-from warnings import warn
+from typing import Any, List, Literal, Optional, Union
 
 import torch
-from pydantic import Field, model_validator
+from pydantic import Field
 from pytorch_lightning import Callback, LightningModule, Trainer
 from pytorch_lightning.callbacks import (
     Callback,
@@ -16,8 +15,8 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import Logger
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-from litutils import CONSOLE, BaseConfig
-from litutils.global_configs.wandb import WandbConfig
+from litutils import BaseConfig
+from litutils.shared_configs.wandb import WandbConfig
 
 
 class CallbacksConfig(BaseConfig):
@@ -28,7 +27,6 @@ class CallbacksConfig(BaseConfig):
     early_stopping: bool = True
     batch_size_finder: bool = False
     lr_monitor: bool = True
-    model_summary: bool = True
     # optuna_pruning: bool = False  # TODO
 
     # pruning_monitor: str = "val_loss"
@@ -45,7 +43,8 @@ class TrainerConfig(BaseConfig["Trainer"]):
 
     # Training params
     max_epochs: int = 50
-    early_stopping_patience: int = 2
+    max_steps: Optional[int] = -1
+    early_stopping_patience: int = 5
     log_every_n_steps: int = 8
     fast_dev_run: bool = False
     gradient_clip_val: Optional[float] = 0.5
@@ -55,9 +54,6 @@ class TrainerConfig(BaseConfig["Trainer"]):
 
     # Hardware settings
     accelerator: str = "auto"
-    """
-    Literal
-    """
     devices: Union[int, str] = "auto"
     num_workers: int = Field(default_factory=lambda: torch.get_num_threads())
     matmul_precision: Literal["medium", "high"] = "medium"
@@ -111,6 +107,7 @@ class TrainerFactory:
         # Create trainer
         trainer = Trainer(
             max_epochs=config.max_epochs,
+            max_steps=config.max_steps,
             accelerator=config.accelerator,
             devices=config.devices,
             log_every_n_steps=config.log_every_n_steps,
@@ -143,6 +140,8 @@ class TrainerFactory:
                     patience=self.config.early_stopping_patience,
                     mode="min",
                     verbose=self.config.verbose,
+                    check_on_train_epoch_end=True,
+                    strict=False,
                 )
             )
 
@@ -150,9 +149,6 @@ class TrainerFactory:
             callbacks.append(
                 LearningRateMonitor(logging_interval="step", log_momentum=True)
             )
-
-        if self.config.callbacks.model_summary:
-            callbacks.append(ModelSummary(max_depth=4))
 
         if self.config.callbacks.progress_bar:
             callbacks.append(CustomTQDMProgressBar())
