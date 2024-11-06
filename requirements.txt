@@ -1,9 +1,9 @@
 pydantic
-pydantic-yaml
 opencv-python
 # torch - install it manually
 pytorch-lightning
 torchmetrics
+torchsummary
 tensorboard
 albumentations
 scikit-learn
