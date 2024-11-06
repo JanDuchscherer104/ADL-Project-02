@@ -63,14 +63,13 @@ class Transforms:
             y (np.ndarray["1; int"]): Label associated with the image.
 
         Returns:
-            Tuple[Tensor["3, H, W; float32"], Tensor["1; int64"]]:
+            Tuple[Tensor["3, H, W; float32"], Tensor["0; int64"]]:
                 The transformed image as a tensor in CHW format with float32 dtype,
                 and the label as an int64 tensor.
         """
         return (
             self._pipeline(image=X)["image"],
-            # torch.from_numpy(y).to(torch.int64).unsqueeze(0),
-            torch.tensor(y, dtype=torch.int64).unsqueeze(0),
+            torch.tensor(y, dtype=torch.int64),
         )
 
     def _create_transform(self) -> A.Compose:
@@ -97,8 +96,7 @@ class Transforms:
             [
                 A.SmallestMaxSize(max_size=self.config.img_size),
                 A.RandomResizedCrop(
-                    width=self.config.img_size,
-                    height=self.config.img_size,
+                    size=(self.config.img_size, self.config.img_size),
                     scale=(0.08, 1.0),
                     ratio=(0.75, 1.3333),
                     p=1.0,
@@ -106,7 +104,12 @@ class Transforms:
                 A.HorizontalFlip(p=0.5),
                 A.RandomRotate90(p=0.5),
                 A.GaussNoise(var_limit=(10.0, 50.0), p=0.5),
-                A.CoarseDropout(max_holes=8, max_height=16, max_width=16, p=0.5),
+                A.CoarseDropout(
+                    num_holes_range=(1, 8),
+                    hole_height_range=(4, 16),
+                    hole_width_range=(4, 16),
+                    p=0.5,
+                ),
                 A.RandomBrightnessContrast(
                     brightness_limit=0.2, contrast_limit=0.2, p=0.5
                 ),
