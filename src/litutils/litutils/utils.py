@@ -15,33 +15,60 @@ from typing import (
     Union,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_yaml import parse_yaml_file_as, to_yaml_file
 from rich.console import Console as RichConsole
 
 
 class _Console(RichConsole):
-    _instance: RichConsole = None
+    _instance = None
+    _lock: Lock = Lock()
 
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super(_Console, cls).__new__(cls)
-            cls._instance.__init__(*args, **kwargs)
-        return cls._instance
+    def __new__(cls, *args, verbose: bool = True, **kwargs):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(_Console, cls).__new__(cls)
+                cls._instance.verbose = verbose
+                cls._instance.__init__(*args, **kwargs)
+            return cls._instance
+
+    def __init__(self, *args, **kwargs):
+        if not hasattr(self, "_initialized"):
+            super().__init__(*args, **kwargs)
+            self._initialized = True
+
+    def _get_caller_stack(self) -> str:
+        """Get formatted stack trace excluding Console internals"""
+        stack = traceback.extract_stack()
+        # Filter out frames from this file
+        current_file = Path(__file__).resolve()
+        relevant_frames = [
+            frame
+            for frame in stack[:-1]  # Exclude current frame
+            if Path(frame.filename).resolve() != current_file
+        ]
+        # Format remaining frames
+        return "".join(
+            traceback.format_list(relevant_frames[-2:])
+        )  # Show last 2 relevant frames
 
     def warn(self, message: str) -> None:
-        # Capture the full stack trace
-        stack_trace = traceback.format_stack(limit=3)[:-1]
-        stack_trace_formatted = "".join(stack_trace)
+        if self.verbose:
+            stack_trace = self._get_caller_stack()
+            self.print(
+                f"[bright_yellow]Warning:[/bright_yellow] {message}\n"
+                f"[dim]{stack_trace}[/dim]"
+            )
 
-        # Print the warning message with the stack trace
-        self.print(
-            f"[bright_yellow]Warning:[/bright_yellow] {message}\n"
-            f"[dim]{stack_trace_formatted}[/dim]"
-        )
+    def log(self, message: str) -> None:
+        if self.verbose:
+            self.print(message)
+
+    def set_verbose(self, verbose: bool) -> None:
+        self.verbose = verbose
 
 
-CONSOLE = _Console(width=120)
+CONSOLE = _Console(width=120, verbose=True)
 
 
 TargetType = TypeVar("TargetType")
@@ -145,19 +172,16 @@ class SingletonConfig(BaseConfig):
 
 
 class Stage(Enum):
-    TRAIN = ("fit", "train")
-    VAL = ("validate", "val")
+    TRAIN = ("train", "fit")
+    VAL = ("val", "validate")
     TEST = ("test",)
 
-    def __init__(self, *values):
-        self.values = values
-
     def __str__(self):
-        return self.values[0]
+        return self.value[0]
 
     @classmethod
     def from_str(cls, value: Optional[str]) -> Optional["Stage"]:
         for member in cls:
-            if value in member.values:
+            if value in member.value:
                 return member
         return None
