@@ -3,20 +3,9 @@ from enum import Enum
 from functools import wraps
 from pathlib import Path
 from threading import Lock
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    Generic,
-    Optional,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, ClassVar, Dict, Generic, Optional, Type, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
-from pydantic_yaml import parse_yaml_file_as, to_yaml_file
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from rich.console import Console as RichConsole
 
 
@@ -88,24 +77,18 @@ class BaseConfig(BaseModel, Generic[TargetType]):
         default_factory=lambda: NoTarget
     )
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, validate_default=True)
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_default=True,
+        validate_assignment=True,
+        protected_namespaces=(),
+    )
 
-    @classmethod
-    def from_yaml(
-        cls: Type["BaseConfig[TargetType]"], file: Union[Path, str]
-    ) -> "BaseConfig[TargetType]":
-        return cls.model_validate(parse_yaml_file_as(cls, file))  # type: ignore
-
-    def to_yaml(self, file: Union[Path, str]) -> None:
-        to_yaml_file(file, self, indent=4)
-
-    def __str__(self) -> str:
-        lines = [self.__class__.__name__ + ":"]
-        for key, val in self.model_dump().items():
-            if isinstance(val, tuple):
-                val = "[" + ", ".join(map(str, val)) + "]"
-            lines.append(f"{key}: {val}")
-        return "\n    ".join(lines)
+    propagated_fields: Dict[str, Any] = Field(
+        default_factory=dict,
+        exclude=True,
+        description="Tracks fields propagated from parent configs",
+    )
 
     def setup_target(self, **kwargs: Any) -> TargetType:
         if not callable(factory := getattr(self.target, "setup_target", self.target)):
@@ -118,13 +101,85 @@ class BaseConfig(BaseModel, Generic[TargetType]):
 
         return factory(self, **kwargs)
 
-    def inspect(self) -> str:
-        lines = [self.__class__.__name__ + ":"]
+    def inspect(self, indent: int = 0) -> str:
+        """Recursively inspect config fields and nested configs.
+
+        Args:
+            indent: Current indentation level
+
+        Returns:
+            Formatted string representation
+        """
+        prefix = "    " * indent
+        lines = [f"{prefix}{self.__class__.__name__}:"]
+
         for field_name, field in self.model_fields.items():
+            value = getattr(self, field_name)
+
+            # Handle nested BaseConfig
+            if isinstance(value, BaseConfig):
+                lines.append(f"{prefix}    {field_name}: {value.inspect(indent + 1)}")
+                continue
+
+            # Handle list/tuple of BaseConfigs
+            if (
+                isinstance(value, (list, tuple))
+                and value
+                and isinstance(value[0], BaseConfig)
+            ):
+                lines.append(f"{prefix}    {field_name}:")
+                for i, item in enumerate(value):
+                    lines.append(f"{prefix}        [{i}]: {item.inspect(indent + 2)}")
+                continue
+
+            # Regular field
             lines.append(
-                f'{field_name}: (value={getattr(self, field_name)}, type={field.annotation.__name__}, description="{field.description}")'
+                f"{prefix}    {field_name}: (value={value}, "
+                f"type={field.annotation.__name__}, "
+                f'description="{field.description}")'
             )
-        return "\n    ".join(lines)
+
+        return "\n".join(lines)
+
+    @model_validator(mode="after")
+    def _propagate_shared_fields(self) -> "BaseConfig":
+        """Propagate shared fields to nested BaseConfig instances"""
+        for field_name, field_value in self:
+
+            # If field is another BaseConfig
+            if isinstance(field_value, BaseConfig):
+                self._propagate_to_child(field_name, field_value)
+
+            # Handle lists/tuples of BaseConfigs
+            elif isinstance(field_value, (list, tuple)):
+                for item in field_value:
+                    if isinstance(item, BaseConfig):
+                        self._propagate_to_child(field_name, item)
+
+        return self
+
+    def _propagate_to_child(
+        self, parent_field: str, child_config: "BaseConfig"
+    ) -> None:
+        """Propagate matching fields from parent to child config"""
+        shared_fields = {
+            name: value
+            for name, value in self
+            if name in child_config.model_fields
+            and name != parent_field
+            and name not in ("propagated_fields", "target")
+        }
+
+        for name, value in shared_fields.items():
+            current_value = getattr(child_config, name, None)
+            if current_value != value:
+                setattr(child_config, name, value)
+                child_config.propagated_fields[name] = value
+
+                CONSOLE.log(
+                    f"Propagated {name}={value} from "
+                    f"{self.__class__.__name__} to {child_config.__class__.__name__}"
+                )
 
 
 class SingletonConfig(BaseConfig):
