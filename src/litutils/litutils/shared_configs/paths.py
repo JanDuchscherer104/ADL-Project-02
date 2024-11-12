@@ -19,12 +19,11 @@ class PathConfig(SingletonConfig):
     optuna_study_uri: Annotated[str, Field(default=".logs/optuna/{study_name}.db")]
 
     # AutoDistill related paths
-    autodistill_dataset: Path = Field(
-        default_factory=lambda: Path(".data/combined_groceries")
-    )
-    autodistill_output: Path = Field(
-        default_factory=lambda: Path(".data/output/labels")
-    )
+    autodistill_dataset: Annotated[Path, Field(default=".data/combined_groceries")]
+    autodistill_output: Annotated[Path, Field(default=".data/output/labels")]
+
+    template_path: Annotated[Path, Field(".data/article_template.md")]
+    output_dir: Annotated[Path, Field(".data/articles_out")]
 
     @field_validator(
         "data",
@@ -34,6 +33,8 @@ class PathConfig(SingletonConfig):
         "wandb",
         "autodistill_dataset",
         "autodistill_output",
+        "template_path",
+        "output_dir",
         mode="before",
     )
     @classmethod
