@@ -23,3 +23,10 @@ pip install -r requirements.txt
 ```zsh
 pip install -e src/litutils
 ```
+
+#### Set API Key
+- Create a `.env` file in the root directory of the project
+- **OpenAI**:
+```.env
+OPENAI_API_KEY=your-api-key
+```
