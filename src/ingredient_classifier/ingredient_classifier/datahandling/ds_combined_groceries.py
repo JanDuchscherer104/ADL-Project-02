@@ -4,11 +4,11 @@ from typing import Annotated, Dict, List, Tuple, Type, Union
 
 import pandas as pd
 import torch
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field, SkipValidation, ValidationInfo, field_validator
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from litutils import CONSOLE, BaseConfig, PathConfig, Stage
+from litutils import CONSOLE, BaseConfig, Optimizable, PathConfig, Stage
 
 from .ds_freiburg_groceries import FreiburgGroceriesDatasetParams
 from .ds_fruit_veg import FruitVegDatasetParams
@@ -28,6 +28,12 @@ class GroceryDatasetConfig(BaseConfig["CombinedGroceryDataset"]):
     """Wheter to save metadata after building mappings"""
 
     apply_transforms: bool = True
+    # transforms_type: Annotated[TransformsType, SkipValidation] = Optimizable[
+    #     TransformsType
+    # ](
+    #     target=TransformsType,
+    #     categories=[TransformsType.TRAIN_FROM_SCRATCH, TransformsType.TRAIN_FINE_TUNE],
+    # ).as_field()
     transforms_type: TransformsType = TransformsType.TRAIN_FROM_SCRATCH
     transforms_config: Annotated[TransformsConfig, Field(None)]
 
@@ -65,13 +71,6 @@ class GroceryDatasetConfig(BaseConfig["CombinedGroceryDataset"]):
         tf_type = info.data["transforms_type"]
         match info.data["stage"]:
             case Stage.TRAIN:
-                assert tf_type in {
-                    TransformsType.TRAIN_FROM_SCRATCH,
-                    TransformsType.TRAIN_FINE_TUNE,
-                }
-                CONSOLE.log(
-                    f"Using transforms type: {tf_type} for split: {info.data['stage']}"
-                )
                 return TransformsConfig(transform_type=tf_type)
             case Stage.VAL | Stage.TEST:
                 return TransformsConfig(stage=TransformsType.VAL)
@@ -89,10 +88,8 @@ class GroceryDatasetConfig(BaseConfig["CombinedGroceryDataset"]):
 
         # Create default params
         return [
-            FreiburgGroceriesDatasetParams(
-                stage=info.data["stage"], paths=info.data["paths"]
-            ),
-            FruitVegDatasetParams(stage=info.data["stage"], paths=info.data["paths"]),
+            FreiburgGroceriesDatasetParams(stage=info.data["stage"]),
+            FruitVegDatasetParams(stage=info.data["stage"]),
         ]
 
     @property

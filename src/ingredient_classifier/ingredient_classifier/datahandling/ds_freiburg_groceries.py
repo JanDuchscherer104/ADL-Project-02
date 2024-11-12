@@ -1,7 +1,8 @@
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Type
 
 import cv2
-from pydantic import Field
+from pydantic import Field, field_validator
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -13,7 +14,9 @@ from .transforms import Transforms
 class FreiburgGroceriesDatasetParams(BaseConfig["FreiburgGroceriesDataset"]):
     """Parameters for FreiburgGroceriesDataset"""
 
-    paths: PathConfig = Field(default_factory=PathConfig)
+    data_dir: Path = Field(
+        default_factory=lambda: PathConfig().data / "freiburg_groceries"
+    )
     stage: Stage = Field(
         default=Stage.TRAIN, description="Dataset stage (TRAIN/VAL/TEST)"
     )
@@ -21,6 +24,23 @@ class FreiburgGroceriesDatasetParams(BaseConfig["FreiburgGroceriesDataset"]):
     target: Type["FreiburgGroceriesDataset"] = Field(
         default_factory=lambda: FreiburgGroceriesDataset
     )
+
+    @field_validator("data_dir", mode="after")
+    @classmethod
+    def check_data_dir(cls, v: Path, _) -> Path:
+        assert v.exists(), f"Data directory not found: {v}"
+        return v
+
+    @property
+    def split_file(self) -> Path:
+        split_mapping = {
+            Stage.TRAIN: "train.txt",
+            Stage.VAL: "val.txt",
+            Stage.TEST: "test.txt",
+        }
+        split_file = self.data_dir / "splits" / split_mapping[self.stage]
+        assert split_file.exists(), f"Split file not found: {split_file}"
+        return split_file
 
 
 class FreiburgGroceriesDataset(Dataset):
@@ -33,23 +53,9 @@ class FreiburgGroceriesDataset(Dataset):
     ):
         """Initialize dataset with specified parameters."""
         self.params = params
-        self.data_dir = params.paths.data / "freiburg_groceries"
-        assert self.data_dir.exists(), f"Data directory not found: {self.data_dir}"
 
         # transforms or identiy function
         self.transforms = transforms or (lambda *x: x)
-
-        # Map stage to split file name
-        split_map = {
-            Stage.TRAIN: "train.txt",
-            Stage.VAL: "val.txt",
-            Stage.TEST: "test.txt",
-        }
-
-        # Load split file
-        split_file = self.data_dir / "splits" / split_map[params.stage]
-        if not split_file.exists():
-            raise FileNotFoundError(f"Split file not found: {split_file}")
 
         def process_line(line):
             parts = line.strip().split()
@@ -59,13 +65,13 @@ class FreiburgGroceriesDataset(Dataset):
             return None
 
         # Read and clean image paths
-        with split_file.open() as f:
+        with self.params.split_file.open() as f:
             self.samples: List[Tuple[str, int]] = list(
                 filter(None, map(process_line, f.readlines()))
             )
 
         if not self.samples:
-            raise ValueError(f"No samples found in {split_file}")
+            raise ValueError(f"No samples found in {self.params.split_file}")
 
         # Create class index mapping
         self.class_to_idx: Dict[str, int] = dict(
@@ -88,12 +94,12 @@ class FreiburgGroceriesDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor]:
         """Get image and label for given index."""
         img_path, label = self.samples[idx]
-        img_path = self.data_dir / "images" / img_path
+        full_img_path = self.params.data_dir / "images" / img_path
 
         # Load image
-        image = cv2.imread(img_path.as_posix())  # type: ignore
+        image = cv2.imread(full_img_path.as_posix())
         if image is None:
-            raise RuntimeError(f"Failed to load image: {img_path}")
+            raise RuntimeError(f"Failed to load image: {full_img_path}")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         return self.transforms(image, label)  # type: ignore

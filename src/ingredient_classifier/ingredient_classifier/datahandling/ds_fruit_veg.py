@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Type
 
 import cv2
-from pydantic import Field
+from pydantic import Field, field_validator
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -14,10 +14,30 @@ from .transforms import Transforms
 class FruitVegDatasetParams(BaseConfig["FruitVegDataset"]):
     """Parameters for FruitVegDataset"""
 
-    paths: PathConfig = Field(default_factory=PathConfig)
+    data_dir: Path = Field(
+        default_factory=lambda: PathConfig().data
+        / "fruit-and-vegetable-image-recognition"
+    )
     stage: Stage = Stage.TRAIN
 
     target: Type["FruitVegDataset"] = Field(default_factory=lambda: FruitVegDataset)
+
+    @field_validator("data_dir", mode="after")
+    @classmethod
+    def check_data_dir(cls, v: Path, _) -> Path:
+        assert v.exists(), f"Data directory not found: {v}"
+        return v
+
+    @property
+    def split_dir(self) -> Path:
+        split_mapping = {
+            Stage.TRAIN: "train",
+            Stage.VAL: "validation",
+            Stage.TEST: "test",
+        }
+        split_dir = self.data_dir / split_mapping[self.stage]
+        assert split_dir.exists(), f"Split directory not found: {split_dir}"
+        return split_dir
 
 
 class FruitVegDataset(Dataset):
@@ -33,24 +53,12 @@ class FruitVegDataset(Dataset):
             params (FruitVegDatasetParams): Dataset parameters
         """
         self.params = params
-        self.data_dir = params.paths.data / "fruit-and-vegetable-image-recognition"
 
         # Set up transforms
         self.transforms = transforms or (lambda *x: x)
 
-        # Get split directory based on stage
-        split_mapping = {
-            Stage.TRAIN: "train",
-            Stage.VAL: "validation",
-            Stage.TEST: "test",
-        }
-        self.split_dir = self.data_dir / split_mapping[params.stage]
-
-        if not self.split_dir.exists():
-            raise RuntimeError(f"Split directory not found: {self.split_dir}")
-
         self.classes: List[str] = sorted(
-            [d.name for d in self.split_dir.iterdir() if d.is_dir()]
+            [d.name for d in self.params.split_dir.iterdir() if d.is_dir()]
         )
 
         self.class_to_idx: Dict[str, int] = {
@@ -62,7 +70,7 @@ class FruitVegDataset(Dataset):
 
         # Collect all image paths and their labels
         self.samples: List[Tuple[Path, int]] = []
-        for class_dir in self.split_dir.iterdir():
+        for class_dir in self.params.split_dir.iterdir():
             if class_dir.is_dir():
                 class_idx = self.class_to_idx[class_dir.name]
                 for img_path in class_dir.glob("*.jp*g"):  # Match both .jpg and .jpeg
