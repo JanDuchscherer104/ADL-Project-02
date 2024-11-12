@@ -1,45 +1,47 @@
 from pathlib import Path
-from typing import Any, List, Literal, Optional, Union
+from typing import Any, List, Literal, Optional, Self, Union
 
 import torch
-from pydantic import Field
+import wandb.util
+from optuna import Trial
+from optuna_integration import PyTorchLightningPruningCallback
+from pydantic import Field, model_validator
 from pytorch_lightning import Callback, LightningModule, Trainer
 from pytorch_lightning.callbacks import (
     Callback,
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
-    ModelSummary,
     TQDMProgressBar,
 )
 from pytorch_lightning.loggers import Logger
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-from litutils import BaseConfig
+from litutils import BaseConfig, PathConfig
 from litutils.shared_configs.wandb import WandbConfig
 
 
 class CallbacksConfig(BaseConfig):
     """Active callbacks configuration"""
 
-    model_checkpoint: bool = True
+    model_checkpoint: bool = False
     progress_bar: bool = True
-    early_stopping: bool = True
+    early_stopping: bool = False
     batch_size_finder: bool = False
     lr_monitor: bool = True
-    # optuna_pruning: bool = False  # TODO
+    optuna_pruning: bool = True
 
-    # pruning_monitor: str = "val_loss"
-    # pruning_mode: Literal["min", "max"] = "min"
+    @model_validator(mode="after")
+    def __check_compatible_callbacks(self) -> Self:
+        assert not (
+            self.optuna_pruning and (self.early_stopping or self.batch_size_finder)
+        ), "Optuna pruning is incompatible with early stopping and batch size finder"
 
-    # @model_validator(mode="after")
-    # def __check_compatible_callbacks(self) -> None:
-    #     """Check for incompatible callback combinations"""
-    #     assert not self.optuna_pruning and not self.early_stopping
+        return self
 
 
 class TrainerConfig(BaseConfig["Trainer"]):
-    """PyTorch Lightning Trainer configuration"""
+    """[PyTorch Lightning Trainer](https://lightning.ai/docs/pytorch/stable/common/trainer.html) configuration"""
 
     # Training params
     max_epochs: int = 50
@@ -52,17 +54,19 @@ class TrainerConfig(BaseConfig["Trainer"]):
     precision: Union[str, int] = "32-true"
     val_check_interval: Union[int, float] = 1.0
 
+    is_optuna: bool = False
+
     # Hardware settings
     accelerator: str = "auto"
     devices: Union[int, str] = "auto"
     num_workers: int = Field(default_factory=lambda: torch.get_num_threads())
-    matmul_precision: Literal["medium", "high"] = "medium"
+    matmul_precision: Literal["medium", "high", "highest"] = "medium"
 
     # Callback settings
     callbacks: CallbacksConfig = Field(default_factory=CallbacksConfig)
 
     # Logging
-    wandb: WandbConfig = WandbConfig(
+    wandb_config: WandbConfig = WandbConfig(
         project="IngredientClassifier",
     )
 
@@ -70,11 +74,22 @@ class TrainerConfig(BaseConfig["Trainer"]):
     is_debug: bool = False
     verbose: bool = True
 
-    def setup_target(self, **kwargs: Any) -> Trainer:
+    def update_wandb_config(self, experiment_config: "ExperimentConfig") -> Self:  # type: ignore
+        """Update WandbConfig with experiment specific settings"""
+        self.wandb_config.name = experiment_config.run_name
+        self.wandb_config.tags = [
+            f"model:{str(experiment_config.module_config.model).strip("ModelType.")}",
+        ]
+
+        return self
+
+    def setup_target(
+        self, experiment_config: "ExperimentConfig", **kwargs: Any  # type: ignore
+    ) -> Trainer:
         """Setup trainer using factory pattern"""
         if self.is_debug:
             self._setup_debug_mode()
-        return TrainerFactory.create(self, **kwargs)
+        return TrainerFactory.create(self, experiment_config, **kwargs)
 
     def _setup_debug_mode(self) -> None:
         """Configure debug settings"""
@@ -89,13 +104,18 @@ class TrainerConfig(BaseConfig["Trainer"]):
 class TrainerFactory:
     """Factory for creating PyTorch Lightning Trainer instances"""
 
-    def __init__(self, config: TrainerConfig):
+    def __init__(self, config: TrainerConfig, experiment_config: "ExperimentConfig", trial: Optional[Trial]):  # type: ignore
         self.config = config
+        self.experiment_config = experiment_config
+        self.trial = trial
 
     @classmethod
-    def create(cls, config: TrainerConfig, **kwargs: Any) -> Trainer:
+    def create(
+        cls, config: TrainerConfig, experiment_config: "ExperimentConfig", **kwargs: Any  # type: ignore
+    ) -> Trainer:
         """Create and configure a new Trainer instance"""
-        factory = cls(config)
+
+        factory = cls(config, experiment_config, trial=kwargs.get("trial"))
 
         # Setup hardware precision
         torch.set_float32_matmul_precision(config.matmul_precision)
@@ -118,18 +138,34 @@ class TrainerFactory:
             val_check_interval=config.val_check_interval,
             callbacks=callbacks,
             logger=loggers,
-            **kwargs,
         )
         return trainer
 
     def _assemble_callbacks(self) -> List[Callback]:
-        """Create and return active callbacks"""
+        """Create and return active callbacks
+
+        Documentation for [PyTorch Lightning Callbacks](https://pytorch-lightning.readthedocs.io/en/stable/extensions/callbacks.html)
+
+        Returns:
+            List[Callback]: A list of active callbacks.
+        """
         callbacks: List[Callback] = []
 
         if self.config.callbacks.model_checkpoint:
+            dirpath = self.experiment_config.paths.checkpoints / str(
+                self.experiment_config.module_config.model
+            ).strip("ModelType.")
+            dirpath.mkdir(parents=True, exist_ok=True)
+
             callbacks.append(
                 ModelCheckpoint(
-                    monitor="val_loss", mode="min", verbose=self.config.verbose
+                    monitor="val_loss",
+                    mode="min",
+                    verbose=self.config.verbose,
+                    dirpath=dirpath,
+                    filename=(
+                        self.experiment_config.run_name + "{epoch:02d}-{val_loss:.2f}"
+                    ),
                 )
             )
 
@@ -153,12 +189,18 @@ class TrainerFactory:
         if self.config.callbacks.progress_bar:
             callbacks.append(CustomTQDMProgressBar())
 
+        if self.config.callbacks.optuna_pruning:
+            assert self.trial is not None, "Trial object is required for Optuna pruning"
+            callbacks.append(
+                self.experiment_config.optuna_config.get_pruning_callback(self.trial)
+            )
+
         return callbacks
 
     def _assemble_loggers(self) -> Union[List[Logger], bool]:
         """Setup logging systems"""
-        if self.config.wandb:
-            return [self.config.wandb.setup_target()]
+        if self.config.wandb_config:
+            return [self.config.wandb_config.setup_target()]
         return True  # Default logger
 
 
