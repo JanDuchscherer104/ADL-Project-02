@@ -1,3 +1,4 @@
+from .shared_configs.optuna import OptunaConfig
 from .shared_configs.optuna_optimizable import Optimizable
 from .shared_configs.paths import PathConfig
 from .shared_configs.wandb import WandbConfig
@@ -10,4 +11,5 @@ __all__ = [
     "BaseConfig",
     "Stage",
     "CONSOLE",
+    "OptunaConfig",
 ]
