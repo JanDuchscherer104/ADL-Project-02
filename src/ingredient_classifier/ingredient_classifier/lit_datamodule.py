@@ -9,7 +9,10 @@ from torch.utils.data import DataLoader
 
 from litutils import BaseConfig, Stage
 
-from .datahandling.ds_combined_groceries import GroceryDatasetConfig
+from .datahandling.ds_combined_groceries import (
+    CombinedGroceryDataset,
+    GroceryDatasetConfig,
+)
 
 
 class DatamoduleParams(BaseConfig["LitDataModule"]):
@@ -24,9 +27,9 @@ class DatamoduleParams(BaseConfig["LitDataModule"]):
 
 class LitDataModule(pl.LightningDataModule):
     config: DatamoduleParams
-    train_ds: GroceryDatasetConfig
-    val_ds: GroceryDatasetConfig
-    test_ds: GroceryDatasetConfig
+    train_ds: CombinedGroceryDataset
+    val_ds: CombinedGroceryDataset
+    test_ds: CombinedGroceryDataset
 
     def __init__(self, config: DatamoduleParams):
         super().__init__()
