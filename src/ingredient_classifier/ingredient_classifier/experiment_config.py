@@ -1,12 +1,15 @@
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Tuple, Type, Union
 
+import optuna
+import wandb
 from pydantic import Field, model_validator
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer
 from typing_extensions import Self
 
-from litutils import CONSOLE, BaseConfig, Optimizable, PathConfig
+from litutils import CONSOLE, BaseConfig, OptunaConfig, PathConfig, Stage
 
 from .lit_datamodule import DatamoduleParams, LitDataModule
 from .lit_module import ImgClassifierParams, LitImageClassifierModule
@@ -20,10 +23,11 @@ class ExperimentConfig(BaseConfig):
 
     is_debug: bool = True
     verbose: bool = True
+    run_name: str = Field(
+        default_factory=lambda: datetime.now().strftime("R%Y-%m-%d_%H:%M:%S")
+    )
 
     from_ckpt: Optional[str] = None
-    is_optuna: bool = False
-    is_gpu: bool = True
 
     is_fast_dev_run: bool = False
     paths: PathConfig = Field(default_factory=PathConfig)
@@ -38,26 +42,10 @@ class ExperimentConfig(BaseConfig):
         default_factory=lambda: LitDataModule
     )  # Expect a class derived from LightningDataModule
 
-    def dump_yaml(self) -> None:
-        self.to_yaml(self.paths.configs)
-
-    def dump(self):
-        i = 1
-        config_file = self.paths.configs / f"{self.wandb_config.run_name}.yaml"
-        while config_file.exists():
-            config_file = self.paths.configs / f"{self.wandb_config.run_name}-{i}.yaml"
-            i += 1
-        self.to_yaml(config_file)
-
-    @classmethod
-    def read(cls, file_name: str, root: Optional[Path] = None) -> Self:
-        root = root or Path(__file__).parents[3].resolve()
-        config_file = (root / ".configs" / file_name).with_suffix(".yaml")
-        assert config_file.exists(), f"{config_file} does not exist"
-        return cls.from_yaml(config_file)  # type: ignore
+    optuna_config: Optional[OptunaConfig] = None
 
     def setup_target(
-        self, **kwargs: Any
+        self, setup_stage: Optional[Stage] = Stage.TRAIN, **kwargs: Any
     ) -> Tuple[Trainer, LightningModule, LightningDataModule]:
         """Create trainer, module and datamodule instances.
 
@@ -68,14 +56,16 @@ class ExperimentConfig(BaseConfig):
             - LightningDataModule instance
         """
         # Setup trainer first
-        trainer = self.trainer_config.setup_target(**kwargs)
+        trainer = self.trainer_config.setup_target(self, **kwargs)
 
         # Setup module with checkpoint handling
         if self.from_ckpt:
             try:
-                CONSOLE.log(f"Loading model from checkpoint: {self.from_ckpt}")
+                from_ckpt = self.paths.checkpoints / self.from_ckpt
+                assert from_ckpt.exists()
+                CONSOLE.log(f"Loading model from checkpoint: {from_ckpt}")
                 lit_module = self.module_type.load_from_checkpoint(
-                    checkpoint_path=self.from_ckpt, params=self.module_config
+                    checkpoint_path=from_ckpt, params=self.module_config
                 )
             except Exception as e:
                 raise RuntimeError(f"Failed to load checkpoint: {e}")
@@ -84,6 +74,54 @@ class ExperimentConfig(BaseConfig):
 
         # Setup datamodule
         lit_datamodule = self.datamodule_config.setup_target()
+        if setup_stage:
+            lit_datamodule.setup(stage=setup_stage)
+            assert lit_datamodule.train_ds is not None
+            assert lit_datamodule.train_ds.num_classes == lit_module.params.num_classes
 
         CONSOLE.log(f"Experiment setup complete!")
         return trainer, lit_module, lit_datamodule
+
+    def run_optuna_study(self) -> None:
+        """Integrate Optuna for hyperparameter optimization"""
+        assert self.optuna_config is not None, "OptunaConfig is not set!"
+
+        def objective(trial: optuna.Trial) -> float:
+            # Create a deep copy of the experiment config to preserve original Optimizable fields
+            experiment_config_copy = deepcopy(self)
+
+            # Setup the experiment, and train
+            experiment_config_copy.trainer_config.wandb_config.name = (
+                f"{self.run_name}_T{trial.number}"
+            )
+            experiment_config_copy.optuna_config.setup_optimizables(experiment_config_copy, trial)  # type: ignore
+            trainer, lit_module, lit_datamodule = experiment_config_copy.setup_target(
+                trial=trial
+            )
+            trainer.fit(lit_module, datamodule=lit_datamodule)
+
+            monitor = experiment_config_copy.optuna_config.monitor  # type: ignore
+            metric = trainer.callback_metrics[monitor].item() or float("inf")
+            CONSOLE.log(
+                f"Trial {trial.number} completed with\n{monitor}: {metric},\nparams:\n{trial.params}"
+            )
+            experiment_config_copy.optuna_config.log_to_wandb()  # type: ignore
+
+            # End current Wandb run
+            wandb.finish()
+
+            return metric
+
+        # Create an Optuna study and optimize
+        self.trainer_config.wandb_config.group = "optuna"
+        self.trainer_config.wandb_config.job_type = f"Opt:{self.run_name}"
+        self.optuna_config.setup_target().optimize(
+            objective,
+            n_trials=self.optuna_config.n_trials,
+        )
+
+    @model_validator(mode="after")
+    def _post_init(self) -> Self:
+        self.trainer_config.update_wandb_config(self)
+
+        return self
