@@ -7,6 +7,10 @@ from typing import Any, Callable, ClassVar, Dict, Generic, Optional, Type, TypeV
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from rich.console import Console as RichConsole
+from rich.syntax import Syntax
+from rich.text import Text
+from rich.theme import Theme
+from rich.tree import Tree
 
 
 class _Console(RichConsole):
@@ -23,6 +27,10 @@ class _Console(RichConsole):
 
     def __init__(self, *args, **kwargs):
         if not hasattr(self, "_initialized"):
+            kwargs["force_terminal"] = True
+            kwargs["color_system"] = "auto"
+            kwargs["markup"] = True  # Ensure markup is enabled
+            kwargs["highlight"] = True  # Enable syntax highlighting
             super().__init__(*args, **kwargs)
             self._initialized = True
 
@@ -57,7 +65,26 @@ class _Console(RichConsole):
         self.verbose = verbose
 
 
-CONSOLE = _Console(width=120, verbose=True)
+CONFIG_THEME = Theme(
+    {
+        "config.name": "bold blue",  # Config class names
+        "config.field": "green",  # Regular fields
+        "config.propagated": "yellow",  # Propagated fields
+        "config.value": "white",  # Field values
+        "config.type": "dim",  # Type annotations
+        "config.doc": "italic dim",  # Documentation  # Changed from 'grey' to 'gray'
+    }
+)
+
+CONSOLE = _Console(
+    width=120,
+    verbose=True,
+    force_terminal=True,
+    color_system="auto",
+    markup=True,
+    highlight=True,
+    theme=CONFIG_THEME,
+)
 
 
 TargetType = TypeVar("TargetType")
@@ -101,24 +128,44 @@ class BaseConfig(BaseModel, Generic[TargetType]):
 
         return factory(self, **kwargs)
 
-    def inspect(self, indent: int = 0) -> str:
-        """Recursively inspect config fields and nested configs.
+    def inspect(self, show_docs: bool = False) -> None:
+        """Pretty print config structure using rich.
 
         Args:
-            indent: Current indentation level
-
-        Returns:
-            Formatted string representation
+            indent: Base indentation level
+            show_docs: Whether to show field descriptions and docstrings
         """
-        prefix = "    " * indent
-        lines = [f"{prefix}{self.__class__.__name__}:"]
+        tree = self._build_tree(show_docs=show_docs)
+        CONSOLE.print(tree, soft_wrap=False, highlight=True, markup=True, emoji=False)
+
+    def _build_tree(self, show_docs: bool = False) -> Tree:
+        """Build rich Tree representation of config."""
+        # Create root node with themed style
+        tree = Tree(Text(self.__class__.__name__, style="config.name"))
+
+        # Add class docstring if requested
+        if show_docs and self.__class__.__doc__:
+            tree.add(Text(self.__class__.__doc__, style="config.doc"))
 
         for field_name, field in self.model_fields.items():
             value = getattr(self, field_name)
 
+            # Style for propagated vs regular fields
+            field_style = (
+                "config.propagated"
+                if field_name in self.propagated_fields
+                else "config.field"
+            )
+
+            # Create field node
+            field_text = Text()
+            field_text.append(f"{field_name}: ", style=field_style)
+
             # Handle nested BaseConfig
             if isinstance(value, BaseConfig):
-                lines.append(f"{prefix}    {field_name}: {value.inspect(indent + 1)}")
+                subtree = tree.add(field_text)
+                nested_tree = value._build_tree(show_docs=show_docs)
+                subtree.add(nested_tree)
                 continue
 
             # Handle list/tuple of BaseConfigs
@@ -127,19 +174,33 @@ class BaseConfig(BaseModel, Generic[TargetType]):
                 and value
                 and isinstance(value[0], BaseConfig)
             ):
-                lines.append(f"{prefix}    {field_name}:")
+                subtree = tree.add(field_text)
                 for i, item in enumerate(value):
-                    lines.append(f"{prefix}        [{i}]: {item.inspect(indent + 2)}")
+                    item_tree = item._build_tree(show_docs=show_docs)
+                    subtree.add(Text(f"[{i}]", style="config.field")).add(item_tree)
                 continue
 
-            # Regular field
-            lines.append(
-                f"{prefix}    {field_name}: (value={value}, "
-                f"type={field.annotation.__name__}, "
-                f'description="{field.description}")'
-            )
+            # Format value with proper styling
+            if isinstance(value, str):
+                value_str = f'"{value}"'
+            elif isinstance(value, (int, float, bool, Enum)):
+                value_str = str(value)
+            else:
+                value_str = f"<{value.__class__.__name__}>"
+            field_text.append(value_str, style="config.value")
 
-        return "\n".join(lines)
+            # Add type annotation
+            type_name = getattr(field.annotation, "__name__", str(field.annotation))
+            field_text.append(f" ({type_name})", style="config.type")
+
+            # Add field node
+            field_node = tree.add(field_text)
+
+            # Add documentation if requested
+            if show_docs and field.description:
+                field_node.add(Text(field.description, style="config.doc"))
+
+        return tree
 
     @model_validator(mode="after")
     def _propagate_shared_fields(self) -> "BaseConfig":
