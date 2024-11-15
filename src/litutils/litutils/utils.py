@@ -3,7 +3,17 @@ from enum import Enum
 from functools import wraps
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, ClassVar, Dict, Generic, Optional, Type, TypeVar
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    ForwardRef,
+    Generic,
+    Optional,
+    Type,
+    TypeVar,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from rich.console import Console as RichConsole
@@ -140,35 +150,31 @@ class BaseConfig(BaseModel, Generic[TargetType]):
 
     def _build_tree(self, show_docs: bool = False) -> Tree:
         """Build rich Tree representation of config."""
-        # Create root node with themed style
         tree = Tree(Text(self.__class__.__name__, style="config.name"))
 
-        # Add class docstring if requested
         if show_docs and self.__class__.__doc__:
             tree.add(Text(self.__class__.__doc__, style="config.doc"))
 
         for field_name, field in self.model_fields.items():
             value = getattr(self, field_name)
-
-            # Style for propagated vs regular fields
             field_style = (
                 "config.propagated"
                 if field_name in self.propagated_fields
                 else "config.field"
             )
 
-            # Create field node
+            # Create field node text
             field_text = Text()
             field_text.append(f"{field_name}: ", style=field_style)
 
-            # Handle nested BaseConfig
+            # Handle nested configs
             if isinstance(value, BaseConfig):
                 subtree = tree.add(field_text)
                 nested_tree = value._build_tree(show_docs=show_docs)
                 subtree.add(nested_tree)
                 continue
 
-            # Handle list/tuple of BaseConfigs
+            # Handle lists/tuples of configs
             if (
                 isinstance(value, (list, tuple))
                 and value
@@ -180,27 +186,62 @@ class BaseConfig(BaseModel, Generic[TargetType]):
                     subtree.add(Text(f"[{i}]", style="config.field")).add(item_tree)
                 continue
 
-            # Format value with proper styling
-            if isinstance(value, str):
-                value_str = f'"{value}"'
-            elif isinstance(value, (int, float, bool, Enum)):
-                value_str = str(value)
-            else:
-                value_str = f"<{value.__class__.__name__}>"
+            # Format value
+            value_str = self._format_value(value)
             field_text.append(value_str, style="config.value")
 
-            # Add type annotation
-            type_name = getattr(field.annotation, "__name__", str(field.annotation))
+            # Add type info
+            type_name = self._get_type_name(field.annotation)
             field_text.append(f" ({type_name})", style="config.type")
 
-            # Add field node
+            # Add field and documentation
             field_node = tree.add(field_text)
-
-            # Add documentation if requested
             if show_docs and field.description:
                 field_node.add(Text(field.description, style="config.doc"))
 
         return tree
+
+    def _format_value(self, value: Any) -> str:
+        """Format a value for display."""
+        try:
+            if isinstance(value, str):
+                return f'"{value}"'
+            if isinstance(value, (int, float, bool)):
+                return str(value)
+            if isinstance(value, Enum):
+                return str(value.value if hasattr(value, "value") else value)
+            if isinstance(value, Path):
+                return str(value)
+            if isinstance(value, dict):
+                if not value:
+                    return "{}"
+                items = [f"{k}: {repr(v)}" for k, v in value.items()]
+                return "{" + ", ".join(items) + "}"
+            if value is None:
+                return "None"
+            if isinstance(value, type):
+                return value.__name__
+            return repr(value)
+        except Exception:
+            return "<unprintable>"
+
+    def _get_type_name(self, annotation: Any) -> str:
+        """Get type name from annotation."""
+        try:
+            if hasattr(annotation, "__origin__"):
+                origin = annotation.__origin__.__name__
+                args = []
+                for arg in annotation.__args__:
+                    if isinstance(arg, ForwardRef):
+                        args.append(arg.__forward_arg__)
+                    elif hasattr(arg, "__name__"):
+                        args.append(arg.__name__)
+                    else:
+                        args.append(str(arg))
+                return f"{origin}[{', '.join(args)}]"
+            return str(annotation).replace("typing.", "")
+        except Exception:
+            return "Any"
 
     @model_validator(mode="after")
     def _propagate_shared_fields(self) -> "BaseConfig":
@@ -253,23 +294,19 @@ class SingletonConfig(BaseConfig):
         arbitrary_types_allowed=True, validate_assignment=True, validate_default=True
     )
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls):
         with cls._lock:
             if cls not in cls._instances:
-                # Create new instance via Pydantic's BaseModel.__new__
                 instance = super(BaseConfig, cls).__new__(cls)
-                # Set initialization flag in dict to avoid Pydantic validation
                 instance.__dict__["_initialized"] = False
                 cls._instances[cls] = instance
             return cls._instances[cls]
 
     def __init__(self, **kwargs):
         if not getattr(self, "_initialized", False):
-            # Only initialize once via Pydantic
             super().__init__(**kwargs)
             self.__dict__["_initialized"] = True
         else:
-            # Update existing instance if new values provided
             for key, value in kwargs.items():
                 if hasattr(self, key):
                     current = getattr(self, key)
@@ -280,10 +317,14 @@ class SingletonConfig(BaseConfig):
                         )
                     setattr(self, key, value)
 
-    def __copy__(self):
+    def __copy__(self) -> "SingletonConfig":
+        """Return self since this is a singleton."""
         return self
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo: Optional[Dict[int, Any]] = None) -> "SingletonConfig":
+        """Return self since this is a singleton. Implements proper deepcopy protocol."""
+        if memo is not None:
+            memo[id(self)] = self
         return self
 
 
